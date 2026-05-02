@@ -44,6 +44,10 @@ export class PartsWarehouseService {
     return this.http.patch<SpareItem>(`${environment.apiUrl}/repuestos/items/${id}/stock`, { delta });
   }
 
+  deleteItem(id: string): Observable<{ message: string }> {
+    return this.http.delete<{ message: string }>(`${environment.apiUrl}/repuestos/items/${id}`);
+  }
+
   updateOil(action: 'add' | 'consume', liters: number): Observable<OilStockState> {
     return this.http.patch<OilStockState>(`${environment.apiUrl}/repuestos/oil`, { action, liters });
   }

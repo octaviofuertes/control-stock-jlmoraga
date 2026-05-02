@@ -124,6 +124,7 @@ import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '
               <button class="stock-stepper" type="button" (click)="changeStock(item.id, -1)">-</button>
               <span class="spare-stock-value">{{ item.stock }}</span>
               <button class="stock-stepper" type="button" (click)="changeStock(item.id, 1)">+</button>
+              <button class="ghost-button danger compact-delete" type="button" (click)="deleteItem(item)">Borrar</button>
             </div>
           </article>
           <p class="empty-state" *ngIf="!focos.length">Todavia no hay focos cargados.</p>
@@ -156,6 +157,7 @@ import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '
               <button class="stock-stepper" type="button" (click)="changeStock(item.id, -1)">-</button>
               <span class="spare-stock-value">{{ item.stock }}</span>
               <button class="stock-stepper" type="button" (click)="changeStock(item.id, 1)">+</button>
+              <button class="ghost-button danger compact-delete" type="button" (click)="deleteItem(item)">Borrar</button>
             </div>
           </article>
           <p class="empty-state" *ngIf="!ferreteria.length">Todavia no hay articulos de ferreteria cargados.</p>
@@ -438,6 +440,7 @@ import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '
       align-items: center;
       gap: 0.75rem;
       flex: 0 0 auto;
+      flex-wrap: wrap;
     }
 
     .stock-stepper {
@@ -457,6 +460,10 @@ import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '
       text-align: center;
       font-weight: 800;
       font-size: 1.05rem;
+    }
+
+    .compact-delete {
+      padding: 0.6rem 0.95rem;
     }
 
     @keyframes oilWave {
@@ -581,6 +588,23 @@ export class PartsWarehouseComponent implements OnInit {
       },
       error: (error) => {
         this.notificationService.show('error', error.error?.message || 'No se pudo actualizar el stock.');
+      },
+    });
+  }
+
+  deleteItem(item: SpareItem): void {
+    const confirmed = window.confirm(`Quieres borrar el repuesto ${item.name}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    this.warehouseService.deleteItem(item.id).subscribe({
+      next: () => {
+        this.notificationService.show('success', 'Repuesto eliminado correctamente.');
+        this.loadState();
+      },
+      error: (error) => {
+        this.notificationService.show('error', error.error?.message || 'No se pudo eliminar el repuesto.');
       },
     });
   }

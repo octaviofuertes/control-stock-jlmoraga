@@ -75,6 +75,15 @@ async function updateSpareItemStock(id, payload) {
   });
 }
 
+async function deleteSpareItem(id) {
+  const item = await prisma.spareItem.findUnique({ where: { id } });
+  if (!item) {
+    throw new AppError('Repuesto no encontrado.', 404);
+  }
+
+  await prisma.spareItem.delete({ where: { id } });
+}
+
 async function updateOilStock(payload) {
   const oil = await ensureOilStock();
   const liters = Number(payload.liters);
@@ -109,5 +118,6 @@ module.exports = {
   getWarehouseState,
   createSpareItem,
   updateSpareItemStock,
+  deleteSpareItem,
   updateOilStock,
 };

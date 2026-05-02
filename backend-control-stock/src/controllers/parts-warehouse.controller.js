@@ -32,9 +32,19 @@ async function updateOil(req, res, next) {
   }
 }
 
+async function deleteItem(req, res, next) {
+  try {
+    await warehouseService.deleteSpareItem(req.params.id);
+    return res.json({ message: 'Repuesto eliminado correctamente.' });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   getState,
   createItem,
   updateItemStock,
+  deleteItem,
   updateOil,
 };
