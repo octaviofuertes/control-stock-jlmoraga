@@ -1,0 +1,17 @@
+const LOCATION_TYPE = {
+  DEPOSIT: 'DEPOSIT',
+  TRACTOR: 'TRACTOR',
+  SEMI: 'SEMI',
+};
+
+const TIRE_STATE = {
+  NUEVA: 'NUEVA',
+  USADA: 'USADA',
+  REPARADA: 'REPARADA',
+  BAJA: 'BAJA',
+};
+
+module.exports = {
+  LOCATION_TYPE,
+  TIRE_STATE,
+};

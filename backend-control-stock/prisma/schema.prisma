@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         UserRole   @default(OPERATOR)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  movements    Movement[]
+}
+
+model Deposit {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tires       Tire[]   @relation("CurrentDeposit")
+}
+
+model Tractor {
+  id          String   @id @default(cuid())
+  plate       String   @unique
+  brand       String?
+  model       String?
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tires       Tire[]   @relation("CurrentTractor")
+}
+
+model Semi {
+  id          String   @id @default(cuid())
+  plate       String   @unique
+  brand       String?
+  model       String?
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  tires       Tire[]   @relation("CurrentSemi")
+}
+
+model SpareItem {
+  id        String        @id @default(cuid())
+  name      String
+  category  SpareCategory
+  stock     Int           @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+}
+
+model OilStock {
+  id             String   @id @default(cuid())
+  key            String   @unique
+  capacityLiters Int      @default(1000)
+  currentLiters  Int      @default(1000)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Tire {
+  id               String       @id @default(cuid())
+  code             String       @unique
+  brand            String
+  model            String
+  size             String
+  state            TireState
+  repairType       Int?
+  notes            String?
+  currentLocation  LocationType
+  currentDepositId String?
+  currentTractorId String?
+  currentSemiId    String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  movements        Movement[]
+  currentDeposit   Deposit?     @relation("CurrentDeposit", fields: [currentDepositId], references: [id])
+  currentSemi      Semi?        @relation("CurrentSemi", fields: [currentSemiId], references: [id])
+  currentTractor   Tractor?     @relation("CurrentTractor", fields: [currentTractorId], references: [id])
+
+  @@index([currentLocation])
+  @@index([currentDepositId])
+  @@index([currentTractorId])
+  @@index([currentSemiId])
+}
+
+model Movement {
+  id                String       @id @default(cuid())
+  tireId            String
+  userId            String
+  previousLocation  LocationType
+  newLocation       LocationType
+  previousState     TireState?
+  newState          TireState?
+  previousRepairType Int?
+  newRepairType     Int?
+  previousDepositId String?
+  previousTractorId String?
+  previousSemiId    String?
+  newDepositId      String?
+  newTractorId      String?
+  newSemiId         String?
+  previousPlate     String?
+  newPlate          String?
+  notes             String?
+  createdAt         DateTime     @default(now())
+  tire              Tire         @relation(fields: [tireId], references: [id])
+  user              User         @relation(fields: [userId], references: [id])
+
+  @@index([tireId, createdAt])
+  @@index([createdAt])
+}
+
+enum UserRole {
+  ADMIN
+  OPERATOR
+}
+
+enum SpareCategory {
+  FOCOS
+  FERRETERIA
+}
+
+enum TireState {
+  NUEVA
+  USADA
+  REPARADA
+  BAJA
+}
+
+enum LocationType {
+  DEPOSIT
+  TRACTOR
+  SEMI
+}

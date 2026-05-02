@@ -1,0 +1,24 @@
+DO $$
+BEGIN
+    CREATE TYPE "UserRole" AS ENUM ('ADMIN', 'OPERATOR');
+EXCEPTION
+    WHEN duplicate_object THEN NULL;
+END $$;
+
+ALTER TABLE "User"
+ADD COLUMN IF NOT EXISTS "role" "UserRole" NOT NULL DEFAULT 'OPERATOR';
+
+ALTER TABLE "Tire"
+ADD COLUMN IF NOT EXISTS "repairType" INTEGER;
+
+ALTER TABLE "Movement"
+ADD COLUMN IF NOT EXISTS "previousState" "TireState";
+
+ALTER TABLE "Movement"
+ADD COLUMN IF NOT EXISTS "newState" "TireState";
+
+ALTER TABLE "Movement"
+ADD COLUMN IF NOT EXISTS "previousRepairType" INTEGER;
+
+ALTER TABLE "Movement"
+ADD COLUMN IF NOT EXISTS "newRepairType" INTEGER;
