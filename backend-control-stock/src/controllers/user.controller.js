@@ -16,7 +16,17 @@ async function createUser(req, res, next) {
   }
 }
 
+async function deleteUser(req, res, next) {
+  try {
+    await userService.deleteUser(req.params.id, req.user.id);
+    return res.json({ message: 'Usuario eliminado correctamente.' });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   listUsers,
   createUser,
+  deleteUser,
 };

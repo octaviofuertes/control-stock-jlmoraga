@@ -22,4 +22,8 @@ export class UserService {
   create(payload: { name: string; email: string; password: string; role: 'ADMIN' | 'OPERATOR' }): Observable<AppUser> {
     return this.http.post<AppUser>(`${environment.apiUrl}/users`, payload);
   }
+
+  delete(id: string): Observable<{ message: string }> {
+    return this.http.delete<{ message: string }>(`${environment.apiUrl}/users/${id}`);
+  }
 }

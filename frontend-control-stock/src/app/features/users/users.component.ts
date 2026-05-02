@@ -62,6 +62,7 @@ import { AppUser, UserService } from '../../core/services/user.service';
                 <th>Email</th>
                 <th>Rol</th>
                 <th>Alta</th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -70,6 +71,9 @@ import { AppUser, UserService } from '../../core/services/user.service';
                 <td>{{ user.email }}</td>
                 <td><span class="chip">{{ user.role }}</span></td>
                 <td>{{ user.createdAt | date:'shortDate' }}</td>
+                <td class="actions-cell">
+                  <button class="ghost-button danger" type="button" (click)="deleteUser(user)">Borrar</button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -121,6 +125,23 @@ export class UsersComponent implements OnInit {
       },
       error: (error) => {
         this.notificationService.show('error', error.error?.message || 'No se pudo crear el usuario.');
+      },
+    });
+  }
+
+  deleteUser(user: AppUser): void {
+    const confirmed = window.confirm(`Quieres borrar al usuario ${user.name}?`);
+    if (!confirmed) {
+      return;
+    }
+
+    this.userService.delete(user.id).subscribe({
+      next: () => {
+        this.notificationService.show('success', 'Usuario eliminado correctamente.');
+        this.loadUsers();
+      },
+      error: (error) => {
+        this.notificationService.show('error', error.error?.message || 'No se pudo eliminar el usuario.');
       },
     });
   }
