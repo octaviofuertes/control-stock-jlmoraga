@@ -1,0 +1,3 @@
+postgresql://control_stock_db_e8xc_user:guZPUWaxD5uyi73xmufIgTuxN5pylcGZ@dpg-d7qpcdflk1mc73cmt07g-a.oregon-postgres.render.com/control_stock_db_e8xc
+
+JWT_SECRET: 007aa38ed3feb975745af222ebcb2b11
