@@ -70,9 +70,9 @@ interface TireGroupedSummary {
             <h3>Stock actual</h3>
             <span class="chip">{{ visibleTires.length }} de {{ tires.length }}</span>
           </div>
-          <div class="table-wrapper stock-table-wrapper">
-            <table>
-            <thead>
+        <div class="table-wrapper stock-table-wrapper">
+          <table>
+              <thead>
               <tr>
                 <th>Codigo</th>
                 <th>Marca</th>
@@ -89,26 +89,29 @@ interface TireGroupedSummary {
                   <td>{{ tire.code }}</td>
                   <td>{{ tire.brand }}</td>
                   <td>{{ tire.model }}</td>
-                <td>{{ tire.size }}</td>
-                <td><span class="chip">{{ formatStateLabel(tire.state, tire.repairType) }}</span></td>
-                <td>
-                  <div class="observation-cell" [title]="tire.notes || 'Sin observaciones'">
-                    {{ tire.notes || 'Sin observaciones' }}
-                  </div>
-                </td>
-                <td>
-                  <strong>{{ tire.locationDetail.label }}</strong>
-                  <div class="table-note">{{ getLocationCaption(tire) }}</div>
-                </td>
-                <td class="actions-cell">
-                  <button *ngIf="tire.state !== 'BAJA'" class="ghost-button" type="button" (click)="editTire(tire)">Editar</button>
-                  <button class="ghost-button danger" type="button" (click)="showHistory(tire)">Historial</button>
-                  <button *ngIf="authService.getCurrentUser()?.role === 'ADMIN'" class="ghost-button danger" type="button" (click)="deleteTire(tire)">Borrar</button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                  <td>{{ tire.size }}</td>
+                  <td><span class="chip">{{ formatStateLabel(tire.state, tire.repairType) }}</span></td>
+                  <td>
+                    <div class="observation-cell" [title]="tire.notes || 'Sin observaciones'">
+                      {{ tire.notes || 'Sin observaciones' }}
+                    </div>
+                  </td>
+                  <td>
+                    <strong>{{ tire.locationDetail.label }}</strong>
+                    <div class="table-note">{{ getLocationCaption(tire) }}</div>
+                  </td>
+                  <td class="actions-cell">
+                    <button *ngIf="tire.state !== 'BAJA'" class="ghost-button" type="button" (click)="editTire(tire)">Editar</button>
+                    <button class="ghost-button danger" type="button" (click)="showHistory(tire)">Historial</button>
+                    <button *ngIf="authService.getCurrentUser()?.role === 'ADMIN'" class="ghost-button danger" type="button" (click)="deleteTire(tire)">Borrar</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="stock-more-actions" *ngIf="canShowMore">
+            <button class="secondary-button" type="button" (click)="showMoreTires()">Mostrar más</button>
+          </div>
       </article>
 
       <div class="inventory-bottom-grid">
@@ -238,9 +241,6 @@ interface TireGroupedSummary {
                 </tr>
               </tbody>
             </table>
-          </div>
-          <div class="stock-more-actions" *ngIf="canShowMore">
-            <button class="secondary-button" type="button" (click)="showMoreTires()">Mostrar más</button>
           </div>
         </article>
       </div>

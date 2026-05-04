@@ -65,14 +65,17 @@ interface FleetUnit {
       <article class="panel-card">
         <div class="panel-head">
           <h3>{{ storagePanelTitle }}</h3>
-          <span class="chip">{{ selectedStorageTires.length }} gomas</span>
+          <span class="chip">{{ visibleStorageTires.length }} de {{ selectedStorageTires.length }} gomas</span>
         </div>
 
         <div class="simple-list" *ngIf="selectedStorageTires.length; else emptyStorage">
-          <article class="simple-item" *ngFor="let tire of selectedStorageTires">
+          <article class="simple-item" *ngFor="let tire of visibleStorageTires">
             <strong>{{ tire.code }}</strong>
             <span>{{ tire.brand }} | {{ tire.model }} | {{ tire.size }} | {{ formatStateLabel(tire.state, tire.repairType) }}</span>
           </article>
+        </div>
+        <div class="stock-more-actions" *ngIf="canShowMoreStorageTires">
+          <button class="secondary-button" type="button" (click)="showMoreStorageTires()">Mostrar más</button>
         </div>
 
         <ng-template #emptyStorage>
@@ -183,6 +186,7 @@ export class DashboardComponent implements OnInit {
   tractors: ResourceItem[] = [];
   tires: Tire[] = [];
   selectedFocus: InventoryFocus = 'DEPOSIT';
+  visibleStorageTiresCount = 10;
 
   get showStoragePanel(): boolean {
     return this.selectedFocus === 'DEPOSIT' || this.selectedFocus === 'GOMERIA' || this.selectedFocus === 'AUXILIO';
@@ -226,6 +230,14 @@ export class DashboardComponent implements OnInit {
     return [];
   }
 
+  get visibleStorageTires(): Tire[] {
+    return this.selectedStorageTires.slice(0, this.visibleStorageTiresCount);
+  }
+
+  get canShowMoreStorageTires(): boolean {
+    return this.visibleStorageTiresCount < this.selectedStorageTires.length;
+  }
+
   get selectedUnits(): FleetUnit[] {
     const baseItems = this.selectedFocus === 'SEMI' ? this.semis : this.tractors;
     return baseItems.map((item) => ({
@@ -254,6 +266,11 @@ export class DashboardComponent implements OnInit {
 
   selectFocus(type: InventoryFocus): void {
     this.selectedFocus = type;
+    this.visibleStorageTiresCount = 10;
+  }
+
+  showMoreStorageTires(): void {
+    this.visibleStorageTiresCount += 10;
   }
 
   formatPlate(plate: string): string {
