@@ -40,6 +40,7 @@ import { Tire, TireService } from '../../core/services/tire.service';
               <button type="button" class="autocomplete-item" *ngFor="let tire of filteredTires()" (click)="selectTire(tire)">
                 <strong>{{ tire.code }}</strong>
                 <span>{{ tire.brand }} | {{ tire.size }} | {{ formatStateLabel(tire.state, tire.repairType) }} | {{ tire.locationDetail.label }}</span>
+                <span>{{ tire.notes || 'Sin observaciones' }}</span>
               </button>
             </div>
           </div>
@@ -256,7 +257,7 @@ export class MovementsComponent implements OnInit {
   }
 
   selectTire(tire: Tire): void {
-    this.tireQuery = `${tire.code} | ${tire.locationDetail.label}`;
+    this.tireQuery = `${tire.code} | ${tire.locationDetail.label} | ${tire.notes || 'Sin observaciones'}`;
     this.form.patchValue({ tireId: tire.id });
     this.showTireSuggestions = false;
   }

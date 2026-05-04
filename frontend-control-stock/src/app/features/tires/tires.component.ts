@@ -79,6 +79,7 @@ interface TireGroupedSummary {
                   <th>Modelo</th>
                   <th>Medida</th>
                   <th>Estado</th>
+                  <th>Observaciones</th>
                   <th>Ubicacion</th>
                   <th>Acciones</th>
                 </tr>
@@ -90,6 +91,11 @@ interface TireGroupedSummary {
                   <td>{{ tire.model }}</td>
                   <td>{{ tire.size }}</td>
                   <td><span class="chip">{{ formatStateLabel(tire.state, tire.repairType) }}</span></td>
+                  <td>
+                    <div class="observation-cell" [title]="tire.notes || 'Sin observaciones'">
+                      {{ tire.notes || 'Sin observaciones' }}
+                    </div>
+                  </td>
                   <td>
                     <strong>{{ tire.locationDetail.label }}</strong>
                     <div class="table-note">{{ getLocationCaption(tire) }}</div>
@@ -262,6 +268,14 @@ interface TireGroupedSummary {
       </article>
     </section>
   `,
+  styles: [`
+    .observation-cell {
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  `],
 })
 export class TiresComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
