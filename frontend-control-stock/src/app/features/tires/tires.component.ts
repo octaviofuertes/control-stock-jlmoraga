@@ -28,91 +28,90 @@ interface TireGroupedSummary {
       </div>
     </section>
 
-    <section class="inventory-layout">
-      <div class="inventory-main-column">
-        <article class="panel-card compact-panel">
-          <div class="panel-head">
-            <h3>Filtros rapidos</h3>
-            <span class="chip">{{ tires.length }} visibles</span>
-          </div>
-          <form class="inline-form" [formGroup]="filtersForm">
-            <label class="field-label">
-              <span>Busqueda</span>
-              <input type="text" placeholder="Codigo, marca, modelo o medida" formControlName="search" />
-            </label>
-            <label class="field-label">
-              <span>Estado</span>
-              <select formControlName="state">
-                <option value="">Todos los estados</option>
-                <option value="NUEVA">Nueva</option>
-                <option value="USADA">Usada</option>
-                <option value="REPARADA">Reparada</option>
-                <option value="BAJA">Baja</option>
-              </select>
-            </label>
-            <label class="field-label">
-              <span>Ubicacion</span>
-              <select formControlName="locationType">
-                <option value="">Todas las ubicaciones</option>
-                <option value="DEPOSIT">Deposito</option>
-                <option value="GOMERIA">Gomeria</option>
-                <option value="AUXILIO">Auxilio</option>
-                <option value="SEMI">Semi</option>
-                <option value="TRACTOR">Tractor</option>
-                <option value="DISCARDED">Descartada</option>
-              </select>
-            </label>
-            <button class="secondary-button" type="button" (click)="loadTires()">Aplicar filtros</button>
-          </form>
-        </article>
+    <section class="inventory-stack">
+      <article class="panel-card compact-panel">
+        <div class="panel-head">
+          <h3>Filtros rapidos</h3>
+          <span class="chip">{{ tires.length }} visibles</span>
+        </div>
+        <form class="inline-form" [formGroup]="filtersForm">
+          <label class="field-label">
+            <span>Busqueda</span>
+            <input type="text" placeholder="Codigo, marca, modelo o medida" formControlName="search" />
+          </label>
+          <label class="field-label">
+            <span>Estado</span>
+            <select formControlName="state">
+              <option value="">Todos los estados</option>
+              <option value="NUEVA">Nueva</option>
+              <option value="USADA">Usada</option>
+              <option value="REPARADA">Reparada</option>
+              <option value="BAJA">Baja</option>
+            </select>
+          </label>
+          <label class="field-label">
+            <span>Ubicacion</span>
+            <select formControlName="locationType">
+              <option value="">Todas las ubicaciones</option>
+              <option value="DEPOSIT">Deposito</option>
+              <option value="GOMERIA">Gomeria</option>
+              <option value="AUXILIO">Auxilio</option>
+              <option value="SEMI">Semi</option>
+              <option value="TRACTOR">Tractor</option>
+              <option value="DISCARDED">Descartada</option>
+            </select>
+          </label>
+          <button class="secondary-button" type="button" (click)="loadTires()">Aplicar filtros</button>
+        </form>
+      </article>
 
         <article class="panel-card">
           <div class="panel-head">
             <h3>Stock actual</h3>
+            <span class="chip">{{ visibleTires.length }} de {{ tires.length }}</span>
           </div>
           <div class="table-wrapper stock-table-wrapper">
             <table>
-              <thead>
-                <tr>
-                  <th>Codigo</th>
-                  <th>Marca</th>
-                  <th>Modelo</th>
-                  <th>Medida</th>
-                  <th>Estado</th>
-                  <th>Observaciones</th>
-                  <th>Ubicacion</th>
-                  <th>Acciones</th>
-                </tr>
+            <thead>
+              <tr>
+                <th>Codigo</th>
+                <th>Marca</th>
+                <th>Modelo</th>
+                <th>Medida</th>
+                <th>Estado</th>
+                <th>Observaciones</th>
+                <th>Ubicacion</th>
+                <th>Acciones</th>
+              </tr>
               </thead>
               <tbody>
-                <tr *ngFor="let tire of tires">
+                <tr *ngFor="let tire of visibleTires">
                   <td>{{ tire.code }}</td>
                   <td>{{ tire.brand }}</td>
                   <td>{{ tire.model }}</td>
-                  <td>{{ tire.size }}</td>
-                  <td><span class="chip">{{ formatStateLabel(tire.state, tire.repairType) }}</span></td>
-                  <td>
-                    <div class="observation-cell" [title]="tire.notes || 'Sin observaciones'">
-                      {{ tire.notes || 'Sin observaciones' }}
-                    </div>
-                  </td>
-                  <td>
-                    <strong>{{ tire.locationDetail.label }}</strong>
-                    <div class="table-note">{{ getLocationCaption(tire) }}</div>
-                  </td>
-                  <td class="actions-cell">
-                    <button *ngIf="tire.state !== 'BAJA'" class="ghost-button" type="button" (click)="editTire(tire)">Editar</button>
-                    <button class="ghost-button danger" type="button" (click)="showHistory(tire)">Historial</button>
-                    <button *ngIf="authService.getCurrentUser()?.role === 'ADMIN'" class="ghost-button danger" type="button" (click)="deleteTire(tire)">Borrar</button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </article>
-      </div>
+                <td>{{ tire.size }}</td>
+                <td><span class="chip">{{ formatStateLabel(tire.state, tire.repairType) }}</span></td>
+                <td>
+                  <div class="observation-cell" [title]="tire.notes || 'Sin observaciones'">
+                    {{ tire.notes || 'Sin observaciones' }}
+                  </div>
+                </td>
+                <td>
+                  <strong>{{ tire.locationDetail.label }}</strong>
+                  <div class="table-note">{{ getLocationCaption(tire) }}</div>
+                </td>
+                <td class="actions-cell">
+                  <button *ngIf="tire.state !== 'BAJA'" class="ghost-button" type="button" (click)="editTire(tire)">Editar</button>
+                  <button class="ghost-button danger" type="button" (click)="showHistory(tire)">Historial</button>
+                  <button *ngIf="authService.getCurrentUser()?.role === 'ADMIN'" class="ghost-button danger" type="button" (click)="deleteTire(tire)">Borrar</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
 
-      <div class="inventory-side-column">
+      <div class="inventory-bottom-grid">
         <article class="panel-card inventory-form-panel">
           <div class="panel-head">
             <h3>{{ editingId ? 'Editar goma' : 'Nueva goma' }}</h3>
@@ -240,6 +239,9 @@ interface TireGroupedSummary {
               </tbody>
             </table>
           </div>
+          <div class="stock-more-actions" *ngIf="canShowMore">
+            <button class="secondary-button" type="button" (click)="showMoreTires()">Mostrar más</button>
+          </div>
         </article>
       </div>
     </section>
@@ -291,6 +293,7 @@ export class TiresComponent implements OnInit {
   deposits: ResourceItem[] = [];
   tractors: ResourceItem[] = [];
   semis: ResourceItem[] = [];
+  visibleTiresCount = 10;
   semiAssignmentQuery = '';
   tractorAssignmentQuery = '';
   showAssignedSemiSuggestions = false;
@@ -329,6 +332,14 @@ export class TiresComponent implements OnInit {
 
       return `${a.stateLabel}${a.brand}${a.model}${a.size}`.localeCompare(`${b.stateLabel}${b.brand}${b.model}${b.size}`);
     });
+  }
+
+  get visibleTires(): Tire[] {
+    return this.tires.slice(0, this.visibleTiresCount);
+  }
+
+  get canShowMore(): boolean {
+    return this.visibleTiresCount < this.tires.length;
   }
 
   readonly filtersForm = this.fb.nonNullable.group({
@@ -391,7 +402,12 @@ export class TiresComponent implements OnInit {
         filters.state === 'BAJA' || filters.locationType === 'DISCARDED' || shouldShowDiscardedBySearch
           ? resolvedItems
           : resolvedItems.filter((tire) => tire.state !== 'BAJA');
+      this.visibleTiresCount = 10;
     });
+  }
+
+  showMoreTires(): void {
+    this.visibleTiresCount += 10;
   }
 
   private normalize(value: string): string {

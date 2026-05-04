@@ -476,6 +476,18 @@ button:hover {
   gap: 2rem;
 }
 
+.inventory-stack {
+  display: grid;
+  gap: 2rem;
+}
+
+.inventory-bottom-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.95fr) minmax(320px, 0.8fr);
+  gap: 2rem;
+  align-items: start;
+}
+
 .inventory-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(360px, 0.9fr);
@@ -716,6 +728,12 @@ button:hover {
   align-items: center;
 }
 
+.stock-more-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
 .table-wrapper {
   overflow: auto;
   -webkit-overflow-scrolling: touch;
@@ -728,9 +746,7 @@ button:hover {
 }
 
 .stock-table-wrapper table {
-  width: 100%;
-  table-layout: fixed;
-  min-width: 0;
+  min-width: 1120px;
 }
 
 .grouped-tires-wrapper {
@@ -1269,6 +1285,7 @@ th {
   }
 
   .inventory-layout,
+  .inventory-bottom-grid,
   .inventory-main-column,
   .panel-grid,
   .stats-grid,
@@ -1360,6 +1377,9 @@ th {
     grid-template-columns: 1fr;
   }
 
+  .inventory-bottom-grid {
+    grid-template-columns: 1fr;
+  }
 
   .stat-card strong {
     font-size: 2rem;
