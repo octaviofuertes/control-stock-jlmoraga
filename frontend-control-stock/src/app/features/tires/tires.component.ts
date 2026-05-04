@@ -250,9 +250,10 @@ interface TireGroupedSummary {
       <article class="panel-card">
         <div class="panel-head">
           <h3>{{ selectedTire ? 'Historial de goma ' + selectedTire.brand + ', ' + selectedTire.model + ', ' + selectedTire.size : 'Historial' }}</h3>
+          <span class="chip" *ngIf="selectedTire">{{ visibleHistory.length }} de {{ history.length }}</span>
         </div>
         <div class="timeline tire-history-timeline" *ngIf="history.length; else emptyHistory">
-          <div class="timeline-item" *ngFor="let item of history">
+          <div class="timeline-item" *ngFor="let item of visibleHistory">
             <div>
               <strong>Goma {{ item.tire?.code || selectedTire?.code }}</strong>
               <p>{{ item.tire?.brand || selectedTire?.brand }} | {{ item.tire?.model || selectedTire?.model }} | {{ item.tire?.size || selectedTire?.size }} | {{ formatStateLabel(item.newState, item.newRepairType) }}</p>
@@ -263,6 +264,9 @@ interface TireGroupedSummary {
             </div>
             <small>{{ item.user.name }} | {{ item.createdAt | date:'short' }}</small>
           </div>
+        </div>
+        <div class="stock-more-actions" *ngIf="canShowMoreHistory">
+          <button class="secondary-button" type="button" (click)="showMoreHistory()">Mostrar más</button>
         </div>
         <ng-template #emptyHistory>
           <p class="empty-state">Selecciona una goma para ver su historial de movimientos.</p>
@@ -294,6 +298,7 @@ export class TiresComponent implements OnInit {
   tractors: ResourceItem[] = [];
   semis: ResourceItem[] = [];
   visibleTiresCount = 10;
+  visibleHistoryCount = 10;
   semiAssignmentQuery = '';
   tractorAssignmentQuery = '';
   showAssignedSemiSuggestions = false;
@@ -340,6 +345,14 @@ export class TiresComponent implements OnInit {
 
   get canShowMore(): boolean {
     return this.visibleTiresCount < this.tires.length;
+  }
+
+  get visibleHistory(): MovementHistory[] {
+    return this.history.slice(0, this.visibleHistoryCount);
+  }
+
+  get canShowMoreHistory(): boolean {
+    return this.visibleHistoryCount < this.history.length;
   }
 
   readonly filtersForm = this.fb.nonNullable.group({
@@ -408,6 +421,10 @@ export class TiresComponent implements OnInit {
 
   showMoreTires(): void {
     this.visibleTiresCount += 10;
+  }
+
+  showMoreHistory(): void {
+    this.visibleHistoryCount += 10;
   }
 
   private normalize(value: string): string {
@@ -637,7 +654,10 @@ export class TiresComponent implements OnInit {
 
   showHistory(tire: Tire): void {
     this.selectedTire = tire;
-    this.tireService.getHistory(tire.id).subscribe((history) => (this.history = history));
+    this.tireService.getHistory(tire.id).subscribe((history) => {
+      this.history = history;
+      this.visibleHistoryCount = 10;
+    });
   }
 
   deleteTire(tire: Tire): void {
@@ -652,6 +672,7 @@ export class TiresComponent implements OnInit {
         if (this.selectedTire?.id === tire.id) {
           this.selectedTire = null;
           this.history = [];
+          this.visibleHistoryCount = 10;
         }
         this.loadTires();
       },

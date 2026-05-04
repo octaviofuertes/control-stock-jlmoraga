@@ -159,10 +159,10 @@ interface FleetUnit {
       <article class="panel-card history-panel">
         <div class="panel-head">
           <h3>Ultimos movimientos</h3>
-          <span class="chip">Tiempo real</span>
+          <span class="chip">{{ visibleRecentMovements.length }} de {{ summary.recentMovements.length }}</span>
         </div>
         <div class="timeline history-timeline dashboard-movements-timeline">
-          <div class="timeline-item" *ngFor="let movement of summary.recentMovements">
+          <div class="timeline-item" *ngFor="let movement of visibleRecentMovements">
             <div>
               <strong>Goma {{ movement.tire.code }}</strong>
               <p>{{ movement.tire.brand }} | {{ movement.tire.model }} | {{ movement.tire.size }} | {{ formatStateLabel(movement.newState, movement.newRepairType) }}</p>
@@ -171,6 +171,9 @@ interface FleetUnit {
             </div>
             <small>{{ movement.user.name }} | {{ movement.createdAt | date:'short' }}</small>
           </div>
+        </div>
+        <div class="stock-more-actions" *ngIf="canShowMoreRecentMovements">
+          <button class="secondary-button" type="button" (click)="showMoreRecentMovements()">Mostrar más</button>
         </div>
       </article>
     </section>
@@ -187,6 +190,7 @@ export class DashboardComponent implements OnInit {
   tires: Tire[] = [];
   selectedFocus: InventoryFocus = 'DEPOSIT';
   visibleStorageTiresCount = 10;
+  visibleRecentMovementsCount = 10;
 
   get showStoragePanel(): boolean {
     return this.selectedFocus === 'DEPOSIT' || this.selectedFocus === 'GOMERIA' || this.selectedFocus === 'AUXILIO';
@@ -238,6 +242,14 @@ export class DashboardComponent implements OnInit {
     return this.visibleStorageTiresCount < this.selectedStorageTires.length;
   }
 
+  get visibleRecentMovements(): DashboardSummary['recentMovements'] {
+    return this.summary?.recentMovements.slice(0, this.visibleRecentMovementsCount) || [];
+  }
+
+  get canShowMoreRecentMovements(): boolean {
+    return (this.summary?.recentMovements.length || 0) > this.visibleRecentMovementsCount;
+  }
+
   get selectedUnits(): FleetUnit[] {
     const baseItems = this.selectedFocus === 'SEMI' ? this.semis : this.tractors;
     return baseItems.map((item) => ({
@@ -261,6 +273,8 @@ export class DashboardComponent implements OnInit {
       this.tractors = tractors;
       this.tires = tires;
       this.selectedFocus = 'DEPOSIT';
+      this.visibleRecentMovementsCount = 10;
+      this.visibleStorageTiresCount = 10;
     });
   }
 
@@ -271,6 +285,10 @@ export class DashboardComponent implements OnInit {
 
   showMoreStorageTires(): void {
     this.visibleStorageTiresCount += 10;
+  }
+
+  showMoreRecentMovements(): void {
+    this.visibleRecentMovementsCount += 10;
   }
 
   formatPlate(plate: string): string {

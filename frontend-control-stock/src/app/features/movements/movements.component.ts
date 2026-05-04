@@ -131,9 +131,10 @@ import { Tire, TireService } from '../../core/services/tire.service';
       <article class="panel-card history-panel">
         <div class="panel-head">
           <h3>Historial global</h3>
+          <span class="chip">{{ visibleMovements.length }} de {{ movements.length }}</span>
         </div>
         <div class="timeline history-timeline">
-          <div class="timeline-item" *ngFor="let movement of movements">
+          <div class="timeline-item" *ngFor="let movement of visibleMovements">
             <div>
               <strong>Goma {{ movement.tire.code }}</strong>
               <p>{{ movement.tire.brand }} | {{ movement.tire.model }} | {{ movement.tire.size }} | {{ formatStateLabel(movement.newState, movement.newRepairType) }}</p>
@@ -143,6 +144,9 @@ import { Tire, TireService } from '../../core/services/tire.service';
             </div>
             <small>{{ movement.user.name }} | {{ movement.createdAt | date:'short' }}</small>
           </div>
+        </div>
+        <div class="stock-more-actions" *ngIf="canShowMoreMovements">
+          <button class="secondary-button" type="button" (click)="showMoreMovements()">Mostrar más</button>
         </div>
       </article>
     </section>
@@ -160,6 +164,7 @@ export class MovementsComponent implements OnInit {
   deposits: ResourceItem[] = [];
   tractors: ResourceItem[] = [];
   semis: ResourceItem[] = [];
+  visibleMovementsCount = 10;
 
   tireQuery = '';
   depositQuery = '';
@@ -170,6 +175,14 @@ export class MovementsComponent implements OnInit {
   showDepositSuggestions = false;
   showTractorSuggestions = false;
   showSemiSuggestions = false;
+
+  get visibleMovements(): Movement[] {
+    return this.movements.slice(0, this.visibleMovementsCount);
+  }
+
+  get canShowMoreMovements(): boolean {
+    return this.visibleMovementsCount < this.movements.length;
+  }
 
   readonly form = this.fb.nonNullable.group({
     tireId: ['', Validators.required],
@@ -311,10 +324,17 @@ export class MovementsComponent implements OnInit {
 
   loadData(): void {
     this.tireService.getAll({}).subscribe((items) => (this.tires = items));
-    this.movementService.getAll().subscribe((items) => (this.movements = items));
+    this.movementService.getAll().subscribe((items) => {
+      this.movements = items;
+      this.visibleMovementsCount = 10;
+    });
     this.resourceService.getDeposits().subscribe((items) => (this.deposits = items));
     this.resourceService.getTractors().subscribe((items) => (this.tractors = items));
     this.resourceService.getSemis().subscribe((items) => (this.semis = items));
+  }
+
+  showMoreMovements(): void {
+    this.visibleMovementsCount += 10;
   }
 
   saveMovement(): void {
