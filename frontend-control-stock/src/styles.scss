@@ -487,12 +487,14 @@ button:hover {
   display: grid;
   gap: 2rem;
   align-content: start;
+  min-width: 0;
 }
 
 .inventory-side-column {
   display: grid;
   gap: 2rem;
   align-content: start;
+  min-width: 0;
 }
 
 .inventory-form-panel {
@@ -723,6 +725,10 @@ button:hover {
   max-height: 560px;
   overflow: auto;
   padding-right: 0.35rem;
+}
+
+.stock-table-wrapper table {
+  min-width: 1120px;
 }
 
 .grouped-tires-wrapper {
