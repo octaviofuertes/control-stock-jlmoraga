@@ -141,7 +141,7 @@ interface FleetUnit {
               <div class="fleet-tire-list" *ngIf="unit.tires.length; else emptyFleet">
                 <div class="fleet-tire-chip-wrap" *ngFor="let tire of unit.tires">
                   <span class="fleet-tire-chip" tabindex="0">
-                    <span class="fleet-tire-chip-default">{{ tire.brand || 'Marca' }} · {{ tire.size || 'Sin medida' }} · {{ tire.model || 'Modelo' }}</span>
+                    <span class="fleet-tire-chip-default">{{ tire.brand || 'Marca' }} · {{ tire.size || 'Sin medida' }} · {{ tire.notes || '-' }}</span>
                     <span class="fleet-tire-chip-state">{{ formatStateLabel(tire.state, tire.repairType) }}</span>
                   </span>
                 </div>
