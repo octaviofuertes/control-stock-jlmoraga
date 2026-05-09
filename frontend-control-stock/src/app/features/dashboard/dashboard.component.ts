@@ -1,5 +1,6 @@
 import { CommonModule, DatePipe, NgFor, NgIf } from '@angular/common';
 import { Component, OnInit, inject } from '@angular/core';
+import { Router } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { DashboardService, DashboardSummary } from '../../core/services/dashboard.service';
 import { ResourceItem, ResourceService } from '../../core/services/resource.service';
@@ -140,10 +141,10 @@ interface FleetUnit {
               </div>
               <div class="fleet-tire-list" *ngIf="unit.tires.length; else emptyFleet">
                 <div class="fleet-tire-chip-wrap" *ngFor="let tire of unit.tires">
-                  <span class="fleet-tire-chip" tabindex="0">
+                  <button class="fleet-tire-chip" type="button" (click)="goToTire(tire)">
                     <span class="fleet-tire-chip-default">{{ tire.brand || 'Marca' }} · {{ tire.size || 'Sin medida' }} · {{ tire.notes || '-' }}</span>
                     <span class="fleet-tire-chip-state">{{ formatStateLabel(tire.state, tire.repairType) }}</span>
-                  </span>
+                  </button>
                 </div>
               </div>
               <ng-template #emptyFleet>
@@ -183,6 +184,7 @@ export class DashboardComponent implements OnInit {
   private readonly dashboardService = inject(DashboardService);
   private readonly resourceService = inject(ResourceService);
   private readonly tireService = inject(TireService);
+  private readonly router = inject(Router);
 
   summary: DashboardSummary | null = null;
   semis: ResourceItem[] = [];
@@ -289,6 +291,12 @@ export class DashboardComponent implements OnInit {
 
   showMoreRecentMovements(): void {
     this.visibleRecentMovementsCount += 10;
+  }
+
+  goToTire(tire: Tire): void {
+    this.router.navigate(['/gomas'], {
+      queryParams: { edit: tire.id },
+    });
   }
 
   formatPlate(plate: string): string {

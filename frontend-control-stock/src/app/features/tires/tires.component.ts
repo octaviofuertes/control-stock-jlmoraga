@@ -1,5 +1,6 @@
 import { CommonModule, DatePipe, NgFor, NgIf } from '@angular/common';
 import { Component, OnInit, inject } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { Observable, of, switchMap } from 'rxjs';
 import { AuthService } from '../../core/services/auth.service';
@@ -288,6 +289,8 @@ export class TiresComponent implements OnInit {
   private readonly tireService = inject(TireService);
   private readonly resourceService = inject(ResourceService);
   private readonly notificationService = inject(NotificationService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   readonly authService = inject(AuthService);
 
   tires: Tire[] = [];
@@ -304,6 +307,7 @@ export class TiresComponent implements OnInit {
   showAssignedSemiSuggestions = false;
   showAssignedTractorSuggestions = false;
   editingLocationLabel = '';
+  pendingEditTireId: string | null = null;
 
   get groupedTireSummaries(): TireGroupedSummary[] {
     const groups = new Map<string, TireGroupedSummary>();
@@ -376,6 +380,10 @@ export class TiresComponent implements OnInit {
   });
 
   ngOnInit(): void {
+    this.route.queryParamMap.subscribe((params) => {
+      this.pendingEditTireId = params.get('edit');
+      this.tryEditPendingTire();
+    });
     this.loadResources();
     this.loadTires();
   }
@@ -416,6 +424,7 @@ export class TiresComponent implements OnInit {
           ? resolvedItems
           : resolvedItems.filter((tire) => tire.state !== 'BAJA');
       this.visibleTiresCount = 10;
+      this.tryEditPendingTire();
     });
   }
 
@@ -425,6 +434,26 @@ export class TiresComponent implements OnInit {
 
   showMoreHistory(): void {
     this.visibleHistoryCount += 10;
+  }
+
+  private tryEditPendingTire(): void {
+    if (!this.pendingEditTireId || !this.tires.length) {
+      return;
+    }
+
+    const tire = this.tires.find((item) => item.id === this.pendingEditTireId);
+    if (!tire) {
+      return;
+    }
+
+    this.editTire(tire);
+    this.pendingEditTireId = null;
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { edit: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   private normalize(value: string): string {
