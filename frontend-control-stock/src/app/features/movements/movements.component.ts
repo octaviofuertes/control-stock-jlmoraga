@@ -209,12 +209,13 @@ export class MovementsComponent implements OnInit {
   filteredTires(): Tire[] {
     const query = this.normalize(this.tireQuery);
     const availableTires = this.tires.filter((tire) => tire.state !== 'BAJA');
-    const items = !query
-      ? availableTires
-      : availableTires.filter((tire) =>
-          [tire.code, tire.brand, tire.model, tire.size, tire.locationDetail.label].some((value) => this.normalize(value).includes(query)),
-        );
-    return items.slice(0, 6);
+    if (!query) {
+      return availableTires.slice(0, 6);
+    }
+
+    return availableTires.filter((tire) =>
+      [tire.code, tire.brand, tire.model, tire.size, tire.locationDetail.label, tire.notes || ''].some((value) => this.normalize(value).includes(query)),
+    );
   }
 
   filteredDeposits(): ResourceItem[] {
