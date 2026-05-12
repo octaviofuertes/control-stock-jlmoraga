@@ -18,7 +18,7 @@ async function createItem(req, res, next) {
 
 async function updateItemStock(req, res, next) {
   try {
-    return res.json(await warehouseService.updateSpareItemStock(req.params.id, req.body));
+    return res.json(await warehouseService.updateSpareItemStock(req.params.id, req.body, req.user));
   } catch (error) {
     return next(error);
   }

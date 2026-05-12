@@ -16,6 +16,7 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   movements    Movement[]
+  spareItemMovements SpareItemMovement[]
 }
 
 model Deposit {
@@ -56,6 +57,22 @@ model SpareItem {
   stock     Int           @default(0)
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
+  movements SpareItemMovement[]
+}
+
+model SpareItemMovement {
+  id             String              @id @default(cuid())
+  spareItemId    String
+  userId         String
+  action         SpareMovementAction
+  quantity       Int
+  resultingStock Int
+  createdAt      DateTime            @default(now())
+  spareItem      SpareItem           @relation(fields: [spareItemId], references: [id], onDelete: Cascade)
+  user           User                @relation(fields: [userId], references: [id])
+
+  @@index([spareItemId, createdAt])
+  @@index([userId, createdAt])
 }
 
 model OilStock {
@@ -128,6 +145,11 @@ enum UserRole {
 enum SpareCategory {
   FOCOS
   FERRETERIA
+}
+
+enum SpareMovementAction {
+  ADD
+  REMOVE
 }
 
 enum TireState {

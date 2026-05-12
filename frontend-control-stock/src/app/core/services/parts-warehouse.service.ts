@@ -10,8 +10,18 @@ export interface SpareItem {
   name: string;
   category: SpareCategory;
   stock: number;
+  latestMovement: SpareItemMovement | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SpareItemMovement {
+  id: string;
+  action: 'ADD' | 'REMOVE';
+  quantity: number;
+  resultingStock: number;
+  createdAt: string;
+  userName: string;
 }
 
 export interface OilStockState {

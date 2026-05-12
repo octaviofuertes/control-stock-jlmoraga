@@ -24,10 +24,38 @@ async function getWarehouseState() {
     ensureOilStock(),
     prisma.spareItem.findMany({
       orderBy: [{ category: 'asc' }, { name: 'asc' }, { createdAt: 'desc' }],
+      include: {
+        movements: {
+          take: 1,
+          orderBy: { createdAt: 'desc' },
+          include: {
+            user: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
     }),
   ]);
 
-  return { oil, items };
+  return {
+    oil,
+    items: items.map((item) => ({
+      ...item,
+      latestMovement: item.movements[0]
+        ? {
+            id: item.movements[0].id,
+            action: item.movements[0].action,
+            quantity: item.movements[0].quantity,
+            resultingStock: item.movements[0].resultingStock,
+            createdAt: item.movements[0].createdAt,
+            userName: item.movements[0].user.name,
+          }
+        : null,
+    })),
+  };
 }
 
 async function createSpareItem(payload) {
@@ -53,7 +81,7 @@ async function createSpareItem(payload) {
   });
 }
 
-async function updateSpareItemStock(id, payload) {
+async function updateSpareItemStock(id, payload, user) {
   const item = await prisma.spareItem.findUnique({ where: { id } });
   if (!item) {
     throw new AppError('Repuesto no encontrado.', 404);
@@ -69,10 +97,26 @@ async function updateSpareItemStock(id, payload) {
     throw new AppError('No puedes dejar el stock del repuesto en negativo.');
   }
 
-  return prisma.spareItem.update({
-    where: { id },
-    data: { stock: nextStock },
+  const result = await prisma.$transaction(async (tx) => {
+    const updatedItem = await tx.spareItem.update({
+      where: { id },
+      data: { stock: nextStock },
+    });
+
+    await tx.spareItemMovement.create({
+      data: {
+        spareItemId: item.id,
+        userId: user.id,
+        action: delta > 0 ? 'ADD' : 'REMOVE',
+        quantity: Math.abs(Math.trunc(delta)),
+        resultingStock: nextStock,
+      },
+    });
+
+    return updatedItem;
   });
+
+  return result;
 }
 
 async function deleteSpareItem(id) {

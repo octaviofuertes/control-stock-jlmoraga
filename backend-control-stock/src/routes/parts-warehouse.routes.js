@@ -1,12 +1,13 @@
 const express = require('express');
 const warehouseController = require('../controllers/parts-warehouse.controller');
+const { adminOnly } = require('../middlewares/auth.middleware');
 
 const router = express.Router();
 
 router.get('/', warehouseController.getState);
 router.post('/items', warehouseController.createItem);
 router.patch('/items/:id/stock', warehouseController.updateItemStock);
-router.delete('/items/:id', warehouseController.deleteItem);
+router.delete('/items/:id', adminOnly, warehouseController.deleteItem);
 router.patch('/oil', warehouseController.updateOil);
 
 module.exports = router;

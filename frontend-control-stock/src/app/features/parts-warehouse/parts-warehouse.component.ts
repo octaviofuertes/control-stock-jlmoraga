@@ -1,13 +1,14 @@
-import { CommonModule } from '@angular/common';
+import { CommonModule, DatePipe } from '@angular/common';
 import { Component, OnInit, inject } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { AuthService } from '../../core/services/auth.service';
 import { NotificationService } from '../../core/services/notification.service';
 import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '../../core/services/parts-warehouse.service';
 
 @Component({
   selector: 'app-parts-warehouse',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [CommonModule, ReactiveFormsModule, DatePipe],
   template: `
     <section class="page-header">
       <div>
@@ -119,12 +120,21 @@ import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '
             <div>
               <strong>{{ item.name }}</strong>
               <p>Stock actual en almacen</p>
+              <small class="spare-movement-copy">
+                Movimiento:
+                <ng-container *ngIf="item.latestMovement; else noFocoMovement">
+                  {{ item.latestMovement.action === 'ADD' ? '+' : '-' }}{{ item.latestMovement.quantity }}
+                  por {{ item.latestMovement.userName }}
+                  | {{ item.latestMovement.createdAt | date:'short' }}
+                </ng-container>
+                <ng-template #noFocoMovement>Sin movimientos</ng-template>
+              </small>
             </div>
             <div class="spare-stock-controls">
               <button class="stock-stepper" type="button" (click)="changeStock(item.id, -1)">-</button>
               <span class="spare-stock-value">{{ item.stock }}</span>
               <button class="stock-stepper" type="button" (click)="changeStock(item.id, 1)">+</button>
-              <button class="ghost-button danger compact-delete" type="button" (click)="deleteItem(item)">Borrar</button>
+              <button *ngIf="isAdmin" class="ghost-button danger compact-delete" type="button" (click)="deleteItem(item)">Borrar</button>
             </div>
           </article>
           <p class="empty-state" *ngIf="!focos.length">Todavia no hay focos cargados.</p>
@@ -152,12 +162,21 @@ import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '
             <div>
               <strong>{{ item.name }}</strong>
               <p>Stock actual en almacen</p>
+              <small class="spare-movement-copy">
+                Movimiento:
+                <ng-container *ngIf="item.latestMovement; else noHardwareMovement">
+                  {{ item.latestMovement.action === 'ADD' ? '+' : '-' }}{{ item.latestMovement.quantity }}
+                  por {{ item.latestMovement.userName }}
+                  | {{ item.latestMovement.createdAt | date:'short' }}
+                </ng-container>
+                <ng-template #noHardwareMovement>Sin movimientos</ng-template>
+              </small>
             </div>
             <div class="spare-stock-controls">
               <button class="stock-stepper" type="button" (click)="changeStock(item.id, -1)">-</button>
               <span class="spare-stock-value">{{ item.stock }}</span>
               <button class="stock-stepper" type="button" (click)="changeStock(item.id, 1)">+</button>
-              <button class="ghost-button danger compact-delete" type="button" (click)="deleteItem(item)">Borrar</button>
+              <button *ngIf="isAdmin" class="ghost-button danger compact-delete" type="button" (click)="deleteItem(item)">Borrar</button>
             </div>
           </article>
           <p class="empty-state" *ngIf="!ferreteria.length">Todavia no hay articulos de ferreteria cargados.</p>
@@ -435,6 +454,13 @@ import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '
       color: var(--muted);
     }
 
+    .spare-movement-copy {
+      display: block;
+      margin-top: 0.35rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
     .spare-stock-controls {
       display: flex;
       align-items: center;
@@ -509,6 +535,7 @@ import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '
 })
 export class PartsWarehouseComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
+  private readonly authService = inject(AuthService);
   private readonly notificationService = inject(NotificationService);
   private readonly warehouseService = inject(PartsWarehouseService);
 
@@ -542,6 +569,10 @@ export class PartsWarehouseComponent implements OnInit {
 
   get ferreteria(): SpareItem[] {
     return this.items.filter((item) => item.category === 'FERRETERIA');
+  }
+
+  get isAdmin(): boolean {
+    return this.authService.getCurrentUser()?.role === 'ADMIN';
   }
 
   ngOnInit(): void {
