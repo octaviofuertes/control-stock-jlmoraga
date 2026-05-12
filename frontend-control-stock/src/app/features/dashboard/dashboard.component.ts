@@ -167,7 +167,7 @@ interface FleetUnit {
             <div>
               <strong>Goma {{ movement.tire.code }}</strong>
               <p>{{ movement.tire.brand }} | {{ movement.tire.model }} | {{ movement.tire.size }} | {{ formatStateLabel(movement.newState, movement.newRepairType) }}</p>
-              <p>{{ formatMovementLocation(movement.previousLocation, movement.previousState, movement.previousRepairType, movement.previousDepositName) }} -> {{ formatMovementLocation(movement.newLocation, movement.newState, movement.newRepairType, movement.newDepositName, movement.newPlate) }}</p>
+              <p>{{ formatMovementLocation(movement.previousLocation, movement.previousState, movement.previousRepairType, movement.previousDepositName, movement.previousPlate) }} -> {{ formatMovementLocation(movement.newLocation, movement.newState, movement.newRepairType, movement.newDepositName, movement.newPlate) }}</p>
               <p *ngIf="hasStateChange(movement)">{{ formatStateTransition(movement.previousState, movement.previousRepairType, movement.newState, movement.newRepairType) }}</p>
             </div>
             <small>{{ movement.user.name }} | {{ movement.createdAt | date:'short' }}</small>

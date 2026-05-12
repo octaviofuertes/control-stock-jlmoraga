@@ -21,6 +21,7 @@ export interface DashboardSummary {
     newRepairType: number | null;
     previousDepositName?: string | null;
     newDepositName?: string | null;
+    previousPlate: string | null;
     newPlate: string | null;
     tire: { id: string; code: string; brand: string; model: string; size: string };
     user: { id: string; name: string };
