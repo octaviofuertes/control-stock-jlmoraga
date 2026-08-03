@@ -137,6 +137,18 @@ model Movement {
   @@index([createdAt])
 }
 
+model AiRecommendationSnapshot {
+  id              String   @id @default(cuid())
+  weekKey         String   @unique
+  generatedAt     DateTime @default(now())
+  validUntil      DateTime
+  recommendations Json
+  brandAnalytics  Json
+  sourceStats     Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
 enum UserRole {
   ADMIN
   OPERATOR

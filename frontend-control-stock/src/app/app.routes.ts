@@ -10,6 +10,7 @@ import { MovementsComponent } from './features/movements/movements.component';
 import { ResourcesComponent } from './features/resources/resources.component';
 import { UsersComponent } from './features/users/users.component';
 import { PartsWarehouseComponent } from './features/parts-warehouse/parts-warehouse.component';
+import { AiRecommendationsComponent } from './features/ai-recommendations/ai-recommendations.component';
 
 export const routes: Routes = [
   { path: 'login', component: LoginComponent, canActivate: [guestGuard] },
@@ -23,6 +24,7 @@ export const routes: Routes = [
       { path: 'gomas', component: TiresComponent },
       { path: 'repuestos', component: PartsWarehouseComponent },
       { path: 'movimientos', component: MovementsComponent },
+      { path: 'recomendaciones-ia', component: AiRecommendationsComponent },
       { path: 'recursos', component: ResourcesComponent },
       { path: 'usuarios', component: UsersComponent, canActivate: [adminGuard] },
     ],

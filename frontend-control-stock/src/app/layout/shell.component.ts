@@ -63,6 +63,19 @@ import { AuthService } from '../core/services/auth.service';
             </span>
             <span>Movimientos</span>
           </a>
+          <a routerLink="/recomendaciones-ia" routerLinkActive="active">
+            <span class="nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M9 5.8a3.1 3.1 0 0 1 6 0"></path>
+                <path d="M8.2 18.2a3.4 3.4 0 0 1-1.7-6.3 3.5 3.5 0 0 1 1.7-6.1"></path>
+                <path d="M15.8 18.2a3.4 3.4 0 0 0 1.7-6.3 3.5 3.5 0 0 0-1.7-6.1"></path>
+                <path d="M12 6v12"></path>
+                <path d="M9.2 10.2H12"></path>
+                <path d="M12 14h2.8"></path>
+              </svg>
+            </span>
+            <span>Recomendaciones IA</span>
+          </a>
           <a routerLink="/recursos" routerLinkActive="active">
             <span class="nav-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24">

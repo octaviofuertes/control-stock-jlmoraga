@@ -11,6 +11,7 @@ const dashboardRoutes = require('./routes/dashboard.routes');
 const resourceRoutes = require('./routes/resource.routes');
 const userRoutes = require('./routes/user.routes');
 const partsWarehouseRoutes = require('./routes/parts-warehouse.routes');
+const aiRecommendationRoutes = require('./routes/ai-recommendation.routes');
 const authMiddleware = require('./middlewares/auth.middleware');
 const errorMiddleware = require('./middlewares/error.middleware');
 
@@ -34,6 +35,7 @@ app.use('/movimientos', movementRoutes);
 app.use('/', resourceRoutes);
 app.use('/dashboard', dashboardRoutes);
 app.use('/repuestos', partsWarehouseRoutes);
+app.use('/recomendaciones-ia', aiRecommendationRoutes);
 
 app.use(errorMiddleware);
 
