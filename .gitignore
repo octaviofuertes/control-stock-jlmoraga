@@ -2,3 +2,4 @@ backend-control-stock/node_modules
 backend-control-stock/.env
 frontend-control-stock/node_modules
 frontend-control-stock/dist
+frontend-control-stock/.angular
