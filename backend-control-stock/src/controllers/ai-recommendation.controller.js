@@ -9,6 +9,16 @@ async function getWeeklyRecommendations(_req, res, next) {
   }
 }
 
+async function regenerateWeeklyRecommendations(_req, res, next) {
+  try {
+    const data = await aiRecommendationService.regenerateWeeklyRecommendations();
+    return res.json(data);
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   getWeeklyRecommendations,
+  regenerateWeeklyRecommendations,
 };

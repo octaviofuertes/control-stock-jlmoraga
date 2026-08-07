@@ -2,31 +2,38 @@ const prisma = require('../config/prisma');
 const { LOCATION_TYPE, TIRE_STATE } = require('../utils/constants');
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const MAX_RECOMMENDATIONS = 8;
+const MAX_RECOMMENDATIONS = 10;
 
-function startOfWeek(date) {
-  const value = new Date(date);
-  value.setHours(0, 0, 0, 0);
-  const daysFromMonday = (value.getDay() + 6) % 7;
-  value.setDate(value.getDate() - daysFromMonday);
-  return value;
+// La operacion es en Argentina (UTC-3). La semana se corta el lunes 00:00 hora local
+// para que "semana" coincida con el calendario del taller y no con UTC.
+const AR_OFFSET_MS = -3 * 60 * 60 * 1000;
+
+// Si se cambia la forma del snapshot hay que subir esta version: los snapshots
+// viejos se regeneran solos en vez de quedar servidos con campos faltantes.
+const SNAPSHOT_SCHEMA_VERSION = 2;
+
+const GOMERIA_STALE_DAYS = 14;
+const GOMERIA_CRITICAL_DAYS = 30;
+
+function pad(value) {
+  return String(value).padStart(2, '0');
 }
 
-function addDays(date, days) {
-  const value = new Date(date);
-  value.setDate(value.getDate() + days);
-  return value;
-}
+function getWeekInfo(date) {
+  const shifted = new Date(date.getTime() + AR_OFFSET_MS);
+  const daysFromMonday = (shifted.getUTCDay() + 6) % 7;
+  shifted.setUTCDate(shifted.getUTCDate() - daysFromMonday);
+  shifted.setUTCHours(0, 0, 0, 0);
 
-function formatDateKey(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const weekKey = `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
+  const weekStart = new Date(shifted.getTime() - AR_OFFSET_MS);
+  const validUntil = new Date(weekStart.getTime() + 7 * MS_PER_DAY);
+
+  return { weekKey, weekStart, validUntil };
 }
 
 function daysBetween(start, end) {
-  if (!start) {
+  if (!start || !end) {
     return 0;
   }
 
@@ -41,8 +48,29 @@ function average(values) {
   return Math.round(values.reduce((total, value) => total + value, 0) / values.length);
 }
 
+function averageDecimal(values) {
+  if (!values.length) {
+    return null;
+  }
+
+  return Math.round((values.reduce((total, value) => total + value, 0) / values.length) * 10) / 10;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function normalize(value) {
   return (value || '').trim().toLowerCase();
+}
+
+function normalizeSize(value) {
+  return (value || '').toUpperCase().replace(/[\s.]/g, '');
+}
+
+// Las marcas se cargan a mano, asi que "MICHELIN" y "michelin" son la misma marca.
+function brandKey(brand) {
+  return (brand || '').trim().toUpperCase().replace(/\s+/g, ' ') || 'SIN MARCA';
 }
 
 function isGomeriaDepositName(name) {
@@ -56,10 +84,6 @@ function isAuxilioDepositName(name) {
 function isSpecialDeposit(tire) {
   const name = tire.currentDeposit?.name || '';
   return isGomeriaDepositName(name) || isAuxilioDepositName(name);
-}
-
-function cleanBrand(brand) {
-  return brand?.trim() || 'Sin marca';
 }
 
 function getLocationLabel(tire) {
@@ -85,6 +109,18 @@ function getLocationLabel(tire) {
   }
 
   return `Semi ${tire.currentSemi?.plate || 'sin patente'}`;
+}
+
+function formatState(state, repairType) {
+  if (!state) {
+    return 'Sin estado';
+  }
+
+  if (state === TIRE_STATE.REPARADA) {
+    return repairType ? `Reparada ${repairType}` : 'Reparada';
+  }
+
+  return state.charAt(0) + state.slice(1).toLowerCase();
 }
 
 function tireSummary(tire) {
@@ -127,74 +163,188 @@ function matchesCurrentPlace(tire, movement) {
 
 function findLastArrivalToCurrentPlace(tire, tireMovements) {
   for (let index = tireMovements.length - 1; index >= 0; index -= 1) {
-    const movement = tireMovements[index];
-    if (matchesCurrentPlace(tire, movement)) {
-      return movement;
+    if (matchesCurrentPlace(tire, tireMovements[index])) {
+      return tireMovements[index];
     }
   }
 
   return null;
 }
 
-function getConfidence(sampleCount, eventCount) {
-  if (sampleCount >= 5 && eventCount >= 3) {
+/**
+ * Estado con el que la goma entro al sistema. Sirve para separar las
+ * reparaciones que ya traia de fabrica/uso previo de las que registro el sistema.
+ */
+function getInitialState(tire, tireMovements) {
+  const first = tireMovements[0];
+  if (first && first.previousState) {
+    return first.previousState;
+  }
+
+  return tire.state;
+}
+
+function isRepairEvent(movement) {
+  if (movement.newState !== TIRE_STATE.REPARADA) {
+    return false;
+  }
+
+  if (movement.previousState !== TIRE_STATE.REPARADA) {
+    return true;
+  }
+
+  // Ya estaba reparada: solo cuenta si subio de nivel (Reparada 1 -> 2, etc.).
+  return (movement.newRepairType || 0) > (movement.previousRepairType || 0);
+}
+
+/**
+ * Historia de una goma resumida en los numeros que despues se agregan por marca.
+ */
+function buildTireHistory(tire, tireMovements, now) {
+  const initialState = getInitialState(tire, tireMovements);
+  const repairEvents = tireMovements.filter(isRepairEvent);
+  const firstRepair = repairEvents[0] || null;
+  const discardMovement = tireMovements.find((movement) => movement.newState === TIRE_STATE.BAJA) || null;
+  const discardedAt = discardMovement ? discardMovement.createdAt : null;
+  const discarded = tire.state === TIRE_STATE.BAJA || Boolean(discardMovement);
+
+  const arrivedRepaired = initialState === TIRE_STATE.REPARADA;
+  const everRepaired = arrivedRepaired || repairEvents.length > 0 || tire.state === TIRE_STATE.REPARADA;
+
+  const observedDays = daysBetween(tire.createdAt, discardedAt || now);
+
+  // Solo es medible de punta a punta cuando entro NUEVA y el sistema vio la reparacion.
+  const daysToFirstRepair =
+    initialState === TIRE_STATE.NUEVA && firstRepair ? daysBetween(tire.createdAt, firstRepair.createdAt) : null;
+
+  const daysToDiscard = discardedAt ? daysBetween(tire.createdAt, discardedAt) : null;
+
+  // Dias que aguanto sin ningun incidente registrado.
+  const firstIncidentAt = firstRepair?.createdAt || discardedAt || null;
+  const daysWithoutIncident = arrivedRepaired ? null : daysBetween(tire.createdAt, firstIncidentAt || now);
+
+  return {
+    tire,
+    tireMovements,
+    initialState,
+    repairEventCount: repairEvents.length,
+    arrivedRepaired,
+    everRepaired,
+    discarded,
+    observedDays,
+    daysToFirstRepair,
+    daysToDiscard,
+    daysWithoutIncident,
+    hadIncident: Boolean(firstIncidentAt),
+  };
+}
+
+/**
+ * La confianza depende de la exposicion observada (gomas x dias), no de la
+ * cantidad de incidentes: una marca sin fallas pero con 11 gomas seguidas
+ * durante 3 meses es evidencia fuerte de que dura, no evidencia debil.
+ */
+function getConfidence(tireCount, observedTireDays) {
+  if (tireCount >= 8 && observedTireDays >= 600) {
     return 'ALTA';
   }
 
-  if (sampleCount >= 2 || eventCount >= 1) {
+  if (tireCount >= 3 && observedTireDays >= 150) {
     return 'MEDIA';
   }
 
   return 'BAJA';
 }
 
-function buildBrandAnalytics(tires, movementsByTire, now) {
+function buildBrandInsight(item) {
+  const parts = [`${item.tireCount} ${item.tireCount === 1 ? 'goma' : 'gomas'} en el sistema`];
+
+  if (item.tireCount) {
+    parts.push(`${item.repairShare}% paso por reparacion`);
+  }
+
+  if (item.averageRepairLevel) {
+    parts.push(`nivel promedio de reparacion ${item.averageRepairLevel}`);
+  }
+
+  if (item.discardedCount) {
+    parts.push(`${item.discardedCount} ${item.discardedCount === 1 ? 'baja' : 'bajas'}`);
+  } else {
+    parts.push('sin bajas');
+  }
+
+  if (item.averageDaysWithoutIncident !== null) {
+    parts.push(`aguantan ${item.averageDaysWithoutIncident} dias sin incidentes en promedio`);
+  }
+
+  return `${item.brand}: ${parts.join(', ')}. Confianza ${item.confidence.toLowerCase()}.`;
+}
+
+function buildBrandAnalytics(histories) {
   const stats = new Map();
 
-  for (const tire of tires) {
-    const brand = cleanBrand(tire.brand);
-    const existing =
-      stats.get(brand) ||
-      {
-        brand,
-        tireCount: 0,
-        repairDurations: [],
-        discardDurations: [],
-        observedDurations: [],
-        repairedCount: 0,
-        discardedCount: 0,
-        longestTire: null,
-      };
+  for (const history of histories) {
+    const brand = brandKey(history.tire.brand);
+    const existing = stats.get(brand) || {
+      brand,
+      rawNames: new Set(),
+      tireCount: 0,
+      everRepairedCount: 0,
+      arrivedRepairedCount: 0,
+      trackedRepairEvents: 0,
+      discardedCount: 0,
+      repairLevels: [],
+      timeToRepairSamples: [],
+      timeToDiscardSamples: [],
+      withoutIncidentSamples: [],
+      observedTireDays: 0,
+      longestTire: null,
+    };
 
-    const tireMovements = movementsByTire.get(tire.id) || [];
-    const firstRepair = tireMovements.find((movement) => movement.newState === TIRE_STATE.REPARADA);
-    const firstDiscard = tireMovements.find((movement) => movement.newState === TIRE_STATE.BAJA);
-    const observedUntil = firstDiscard?.createdAt || now;
-    const observedDays = daysBetween(tire.createdAt, observedUntil);
-
+    existing.rawNames.add((history.tire.brand || '').trim() || 'Sin marca');
     existing.tireCount += 1;
-    existing.observedDurations.push(observedDays);
+    existing.observedTireDays += history.observedDays;
+    existing.trackedRepairEvents += history.repairEventCount;
 
-    if (firstRepair) {
-      existing.repairedCount += 1;
-      existing.repairDurations.push(daysBetween(tire.createdAt, firstRepair.createdAt));
+    if (history.everRepaired) {
+      existing.everRepairedCount += 1;
     }
 
-    if (firstDiscard) {
+    if (history.arrivedRepaired) {
+      existing.arrivedRepairedCount += 1;
+    }
+
+    if (history.discarded) {
       existing.discardedCount += 1;
-      existing.discardDurations.push(daysBetween(tire.createdAt, firstDiscard.createdAt));
     }
 
-    if (!existing.longestTire || observedDays > existing.longestTire.days) {
-      existing.longestTire = {
-        code: tire.code,
-        brand: tire.brand,
-        model: tire.model,
-        size: tire.size,
-        days: observedDays,
-        state: tire.state,
-        location: getLocationLabel(tire),
-      };
+    if (history.tire.state === TIRE_STATE.REPARADA && history.tire.repairType) {
+      existing.repairLevels.push(history.tire.repairType);
+    }
+
+    if (history.daysToFirstRepair !== null) {
+      existing.timeToRepairSamples.push(history.daysToFirstRepair);
+    }
+
+    if (history.daysToDiscard !== null) {
+      existing.timeToDiscardSamples.push(history.daysToDiscard);
+    }
+
+    if (history.daysWithoutIncident !== null) {
+      existing.withoutIncidentSamples.push(history.daysWithoutIncident);
+
+      const isBetter = !existing.longestTire || history.daysWithoutIncident > existing.longestTire.days;
+      if (isBetter && !history.hadIncident) {
+        existing.longestTire = {
+          code: history.tire.code,
+          brand: history.tire.brand,
+          model: history.tire.model,
+          size: history.tire.size,
+          days: history.daysWithoutIncident,
+          state: history.tire.state,
+          location: getLocationLabel(history.tire),
+        };
+      }
     }
 
     stats.set(brand, existing);
@@ -202,50 +352,146 @@ function buildBrandAnalytics(tires, movementsByTire, now) {
 
   return Array.from(stats.values())
     .map((item) => {
-      const averageDaysToRepair = average(item.repairDurations);
-      const averageDaysToDiscard = average(item.discardDurations);
-      const averageObservedDays = average(item.observedDurations);
-      const eventCount = item.repairedCount + item.discardedCount;
-      const confidence = getConfidence(item.tireCount, eventCount);
-      const durabilityScore = averageDaysToDiscard || averageObservedDays || 0;
+      const repairShare = item.tireCount ? Math.round((item.everRepairedCount / item.tireCount) * 100) : 0;
+      const discardShare = item.tireCount ? Math.round((item.discardedCount / item.tireCount) * 100) : 0;
+      const averageRepairLevel = averageDecimal(item.repairLevels);
 
-      return {
+      // Puntaje 0-100: penaliza cuantas gomas necesitaron reparacion, cuantas
+      // terminaron de baja y que tan castigadas estan las que se repararon.
+      const durabilityScore = Math.round(
+        clamp(
+          100 - repairShare * 0.45 - discardShare * 0.35 - (averageRepairLevel ? (averageRepairLevel - 1) * 12 : 0),
+          0,
+          100,
+        ),
+      );
+
+      const enriched = {
         brand: item.brand,
+        aliases: Array.from(item.rawNames).sort(),
         tireCount: item.tireCount,
-        repairedCount: item.repairedCount,
+        repairedCount: item.everRepairedCount,
+        arrivedRepairedCount: item.arrivedRepairedCount,
+        trackedRepairEvents: item.trackedRepairEvents,
         discardedCount: item.discardedCount,
-        averageDaysToRepair,
-        averageDaysToDiscard,
-        averageObservedDays,
+        repairShare,
+        discardShare,
+        averageRepairLevel,
+        averageDaysToRepair: average(item.timeToRepairSamples),
+        averageDaysToRepairSample: item.timeToRepairSamples.length,
+        averageDaysToDiscard: average(item.timeToDiscardSamples),
+        averageDaysToDiscardSample: item.timeToDiscardSamples.length,
+        averageDaysWithoutIncident: average(item.withoutIncidentSamples),
+        averageObservedDays: item.tireCount ? Math.round(item.observedTireDays / item.tireCount) : 0,
+        observedTireDays: item.observedTireDays,
         durabilityScore,
-        confidence,
+        confidence: getConfidence(item.tireCount, item.observedTireDays),
         longestTire: item.longestTire,
-        insight: buildBrandInsight(item.brand, averageDaysToRepair, averageDaysToDiscard, averageObservedDays, confidence),
       };
+
+      return { ...enriched, insight: buildBrandInsight(enriched) };
     })
     .sort((a, b) => {
       if (b.durabilityScore !== a.durabilityScore) {
         return b.durabilityScore - a.durabilityScore;
       }
 
+      if (b.tireCount !== a.tireCount) {
+        return b.tireCount - a.tireCount;
+      }
+
       return a.brand.localeCompare(b.brand);
     });
 }
 
-function buildBrandInsight(brand, averageDaysToRepair, averageDaysToDiscard, averageObservedDays, confidence) {
-  if (averageDaysToRepair && averageDaysToDiscard) {
-    return `${brand}: promedio de ${averageDaysToRepair} dias hasta reparacion y ${averageDaysToDiscard} dias hasta baja. Confianza ${confidence.toLowerCase()}.`;
+/**
+ * Podio de marcas. Solo entran las que tienen exposicion suficiente: una marca
+ * con 8 gomas cargadas hace 15 dias puntua 100 y no significa nada todavia.
+ */
+function buildBrandRanking(brandAnalytics) {
+  const eligible = brandAnalytics.filter((item) => item.confidence !== 'BAJA' && item.brand !== 'SIN MARCA');
+  const best = eligible.slice(0, 3);
+  const bestNames = new Set(best.map((item) => item.brand));
+
+  return {
+    best,
+    worst: eligible
+      .slice(-3)
+      .reverse()
+      .filter((item) => !bestNames.has(item.brand)),
+    eligibleCount: eligible.length,
+    excludedForLowEvidence: brandAnalytics.length - eligible.length,
+  };
+}
+
+function letterSignature(value) {
+  return value.replace(/[^A-Z0-9]/g, '').split('').sort().join('');
+}
+
+function levenshtein(a, b) {
+  if (a === b) {
+    return 0;
   }
 
-  if (averageDaysToRepair) {
-    return `${brand}: promedio de ${averageDaysToRepair} dias antes de registrar reparacion. Confianza ${confidence.toLowerCase()}.`;
+  const previous = Array.from({ length: b.length + 1 }, (_unused, index) => index);
+
+  for (let i = 1; i <= a.length; i += 1) {
+    let diagonal = previous[0];
+    previous[0] = i;
+
+    for (let j = 1; j <= b.length; j += 1) {
+      const temporary = previous[j];
+      previous[j] = Math.min(
+        previous[j] + 1,
+        previous[j - 1] + 1,
+        diagonal + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+      diagonal = temporary;
+    }
   }
 
-  if (averageDaysToDiscard) {
-    return `${brand}: promedio de ${averageDaysToDiscard} dias antes de baja. Confianza ${confidence.toLowerCase()}.`;
+  return previous[b.length];
+}
+
+/**
+ * Marcas que casi seguro son la misma escrita distinto (KUMHO/KHUMO, HAWKA/HAKWA).
+ * No se unifican solas: se avisan para que alguien las corrija a mano.
+ */
+function findPossibleBrandDuplicates(brandAnalytics) {
+  const pairs = [];
+
+  for (let i = 0; i < brandAnalytics.length; i += 1) {
+    for (let j = i + 1; j < brandAnalytics.length; j += 1) {
+      const a = brandAnalytics[i];
+      const b = brandAnalytics[j];
+
+      if (a.brand === 'SIN MARCA' || b.brand === 'SIN MARCA') {
+        continue;
+      }
+
+      if (Math.min(a.brand.length, b.brand.length) < 4) {
+        continue;
+      }
+
+      const sameLetters = letterSignature(a.brand) === letterSignature(b.brand);
+      const closeSpelling = levenshtein(a.brand, b.brand) <= 1;
+
+      if (!sameLetters && !closeSpelling) {
+        continue;
+      }
+
+      const [main, duplicate] = a.tireCount >= b.tireCount ? [a, b] : [b, a];
+      pairs.push({
+        brand: main.brand,
+        possibleDuplicate: duplicate.brand,
+        brandTires: main.tireCount,
+        duplicateTires: duplicate.tireCount,
+        message: `"${duplicate.brand}" (${duplicate.tireCount} ${duplicate.tireCount === 1 ? 'goma' : 'gomas'}) parece un error de tipeo de "${main.brand}" (${main.tireCount} gomas). Unificarlas mejora el analisis por marca.`,
+      });
+    }
   }
 
-  return `${brand}: ${averageObservedDays || 0} dias observados en promedio; faltan mas reparaciones o bajas para comparar mejor.`;
+  return pairs;
 }
 
 function stateWeight(tire) {
@@ -254,7 +500,7 @@ function stateWeight(tire) {
   }
 
   if (tire.state === TIRE_STATE.USADA) {
-    return 75;
+    return 70;
   }
 
   if (tire.state === TIRE_STATE.REPARADA) {
@@ -264,150 +510,222 @@ function stateWeight(tire) {
   return 0;
 }
 
-function sortDepositCandidates(candidates, analyticsByBrand) {
-  return [...candidates].sort((a, b) => {
-    const scoreA = stateWeight(a) + (analyticsByBrand.get(cleanBrand(a.brand))?.durabilityScore || 0) / 30;
-    const scoreB = stateWeight(b) + (analyticsByBrand.get(cleanBrand(b.brand))?.durabilityScore || 0) / 30;
-    if (scoreB !== scoreA) {
-      return scoreB - scoreA;
-    }
-
-    return a.code.localeCompare(b.code);
-  });
-}
-
+/**
+ * Reemplazo: SIEMPRE de la misma medida. Antes podia devolver una goma de otra
+ * medida y la recomendacion quedaba inaplicable.
+ */
 function pickReplacement(tire, depositCandidates, usedReplacementIds, analyticsByBrand) {
-  const sorted = sortDepositCandidates(
-    depositCandidates.filter((candidate) => candidate.id !== tire.id && !usedReplacementIds.has(candidate.id)),
-    analyticsByBrand,
-  );
-  const sameSize = sorted.find((candidate) => normalize(candidate.size) === normalize(tire.size));
-  return sameSize || sorted[0] || null;
+  return depositCandidates
+    .filter(
+      (candidate) =>
+        candidate.id !== tire.id &&
+        !usedReplacementIds.has(candidate.id) &&
+        normalizeSize(candidate.size) === normalizeSize(tire.size),
+    )
+    .sort((a, b) => {
+      const scoreA = stateWeight(a) + (analyticsByBrand.get(brandKey(a.brand))?.durabilityScore || 0) / 4;
+      const scoreB = stateWeight(b) + (analyticsByBrand.get(brandKey(b.brand))?.durabilityScore || 0) / 4;
+      if (scoreB !== scoreA) {
+        return scoreB - scoreA;
+      }
+
+      return a.code.localeCompare(b.code);
+    })[0] || null;
 }
 
 function getPriority(score) {
-  if (score >= 72) {
+  if (score >= 70) {
     return 'ALTA';
   }
 
-  if (score >= 45) {
+  if (score >= 42) {
     return 'MEDIA';
   }
 
   return 'BAJA';
 }
 
-function scoreFleetTire(tire, tireMovements, daysInCurrentPlace, brandAnalytics) {
-  const repairScore = tire.state === TIRE_STATE.REPARADA ? (tire.repairType || 1) * 20 : tire.state === TIRE_STATE.USADA ? 12 : 0;
-  const placeScore = Math.min(32, Math.round(daysInCurrentPlace / 3));
-  const movementScore = Math.min(16, tireMovements.length * 2);
-  const averageRepair = brandAnalytics?.averageDaysToRepair || null;
-  const averageDiscard = brandAnalytics?.averageDaysToDiscard || null;
-  const overRepairAverage = averageRepair && daysInCurrentPlace > averageRepair ? 14 : 0;
-  const nearDiscardAverage = averageDiscard && daysInCurrentPlace > averageDiscard * 0.75 ? 18 : 0;
+function scoreFleetTire(history, daysInCurrentPlace, brandAnalytics) {
+  const tire = history.tire;
 
-  return repairScore + placeScore + movementScore + overRepairAverage + nearDiscardAverage;
-}
+  let score = 0;
 
-function buildFleetRecommendations(fleetTires, depositCandidates, movementsByTire, analyticsByBrand, now) {
-  const usedReplacementIds = new Set();
-  const scored = fleetTires
-    .map((tire) => {
-      const tireMovements = movementsByTire.get(tire.id) || [];
-      const lastArrival = findLastArrivalToCurrentPlace(tire, tireMovements);
-      const daysInCurrentPlace = daysBetween(lastArrival?.createdAt || tire.createdAt, now);
-      const brandAnalytics = analyticsByBrand.get(cleanBrand(tire.brand));
-      const score = scoreFleetTire(tire, tireMovements, daysInCurrentPlace, brandAnalytics);
-
-      return {
-        tire,
-        tireMovements,
-        daysInCurrentPlace,
-        brandAnalytics,
-        score,
-      };
-    })
-    .filter((item) => item.score >= 28 || item.tire.state === TIRE_STATE.REPARADA || item.daysInCurrentPlace >= 45)
-    .sort((a, b) => b.score - a.score);
-
-  return scored.slice(0, MAX_RECOMMENDATIONS).map((item) => {
-    const replacement = pickReplacement(item.tire, depositCandidates, usedReplacementIds, analyticsByBrand);
-    if (replacement) {
-      usedReplacementIds.add(replacement.id);
-    }
-
-    const currentPlace = getLocationLabel(item.tire);
-    const targetPlace = item.tire.state === TIRE_STATE.REPARADA && (item.tire.repairType || 0) >= 3 ? 'Baja o revision final' : 'Gomeria';
-    const action = replacement
-      ? `Cambiar goma ${item.tire.code} desde ${currentPlace} hacia ${targetPlace} y colocar goma ${replacement.code} en ${currentPlace}.`
-      : `Revisar goma ${item.tire.code} en ${currentPlace} y preparar un reemplazo compatible antes de mandarla a ${targetPlace}.`;
-
-    return {
-      id: `fleet-${item.tire.id}`,
-      category: 'ROTACION',
-      priority: getPriority(item.score),
-      title: `Rotar goma ${item.tire.code}`,
-      action,
-      reason: `Lleva ${item.daysInCurrentPlace} dias en ${currentPlace}, estado ${formatState(item.tire)} y ${item.tireMovements.length} movimientos registrados.`,
-      from: currentPlace,
-      to: targetPlace,
-      tire: tireSummary(item.tire),
-      replacementTire: replacement ? tireSummary(replacement) : null,
-      confidence: item.brandAnalytics?.confidence || 'MEDIA',
-      evidence: {
-        daysInCurrentPlace: item.daysInCurrentPlace,
-        movementCount: item.tireMovements.length,
-        brandAverageDaysToRepair: item.brandAnalytics?.averageDaysToRepair || null,
-        brandAverageDaysToDiscard: item.brandAnalytics?.averageDaysToDiscard || null,
-        score: item.score,
-      },
-    };
-  });
-}
-
-function buildGomeriaRecommendations(gomeriaTires, movementsByTire, now) {
-  return gomeriaTires
-    .map((tire) => {
-      const tireMovements = movementsByTire.get(tire.id) || [];
-      const lastArrival = findLastArrivalToCurrentPlace(tire, tireMovements);
-      const daysInGomeria = daysBetween(lastArrival?.createdAt || tire.updatedAt || tire.createdAt, now);
-
-      return {
-        tire,
-        daysInGomeria,
-      };
-    })
-    .filter((item) => item.daysInGomeria >= 14)
-    .sort((a, b) => b.daysInGomeria - a.daysInGomeria)
-    .slice(0, 3)
-    .map((item) => ({
-      id: `gomeria-${item.tire.id}`,
-      category: 'GOMERIA',
-      priority: item.daysInGomeria >= 30 ? 'ALTA' : 'MEDIA',
-      title: `Resolver goma ${item.tire.code} en gomeria`,
-      action: `Si la goma ${item.tire.code} ya esta lista, moverla a deposito; si no recupera, evaluarla para baja.`,
-      reason: `Permanece hace ${item.daysInGomeria} dias en gomeria.`,
-      from: 'Gomeria',
-      to: 'Deposito o baja',
-      tire: tireSummary(item.tire),
-      replacementTire: null,
-      confidence: 'MEDIA',
-      evidence: {
-        daysInCurrentPlace: item.daysInGomeria,
-        movementCount: (movementsByTire.get(item.tire.id) || []).length,
-        brandAverageDaysToRepair: null,
-        brandAverageDaysToDiscard: null,
-        score: item.daysInGomeria,
-      },
-    }));
-}
-
-function formatState(tire) {
   if (tire.state === TIRE_STATE.REPARADA) {
-    return tire.repairType ? `REPARADA ${tire.repairType}` : 'REPARADA';
+    score += (tire.repairType || 1) * 22;
+  } else if (tire.state === TIRE_STATE.USADA) {
+    score += 14;
   }
 
-  return tire.state;
+  score += Math.min(30, Math.round(daysInCurrentPlace / 3));
+  score += Math.min(14, history.repairEventCount * 7);
+
+  // Marca con mal historial: adelantar la revision.
+  if (brandAnalytics && brandAnalytics.confidence !== 'BAJA' && brandAnalytics.durabilityScore < 55) {
+    score += 10;
+  }
+
+  return score;
+}
+
+function buildFleetRecommendations(fleetHistories, depositCandidates, analyticsByBrand, now) {
+  const usedReplacementIds = new Set();
+
+  return fleetHistories
+    .map((history) => {
+      const lastArrival = findLastArrivalToCurrentPlace(history.tire, history.tireMovements);
+      const daysInCurrentPlace = daysBetween(lastArrival?.createdAt || history.tire.createdAt, now);
+      const brandAnalytics = analyticsByBrand.get(brandKey(history.tire.brand)) || null;
+
+      return {
+        history,
+        daysInCurrentPlace,
+        brandAnalytics,
+        score: scoreFleetTire(history, daysInCurrentPlace, brandAnalytics),
+      };
+    })
+    .filter((item) => item.score >= 45)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_RECOMMENDATIONS)
+    .map((item) => {
+      const tire = item.history.tire;
+      const replacement = pickReplacement(tire, depositCandidates, usedReplacementIds, analyticsByBrand);
+      if (replacement) {
+        usedReplacementIds.add(replacement.id);
+      }
+
+      const currentPlace = getLocationLabel(tire);
+      const atRepairLimit = tire.state === TIRE_STATE.REPARADA && (tire.repairType || 0) >= 3;
+      const targetPlace = atRepairLimit ? 'Gomeria (evaluar baja)' : 'Gomeria';
+
+      const action = replacement
+        ? `Sacar la goma ${tire.code} de ${currentPlace}, mandarla a ${targetPlace} y montar en su lugar la goma ${replacement.code} (${replacement.brand} ${replacement.size}, ${formatState(replacement.state, replacement.repairType)}) que esta en deposito.`
+        : `Sacar la goma ${tire.code} de ${currentPlace} y mandarla a ${targetPlace}. No hay en deposito ninguna goma libre de medida ${tire.size}: conseguir el reemplazo antes de bajarla.`;
+
+      const reasonParts = [
+        `Esta ${formatState(tire.state, tire.repairType)}`,
+        `lleva ${item.daysInCurrentPlace} dias en ${currentPlace}`,
+      ];
+
+      if (item.history.repairEventCount) {
+        reasonParts.push(
+          `acumula ${item.history.repairEventCount} ${item.history.repairEventCount === 1 ? 'reparacion registrada' : 'reparaciones registradas'}`,
+        );
+      }
+
+      if (item.brandAnalytics && item.brandAnalytics.confidence !== 'BAJA' && item.brandAnalytics.durabilityScore < 55) {
+        reasonParts.push(`la marca ${item.brandAnalytics.brand} viene con ${item.brandAnalytics.repairShare}% de reparaciones`);
+      }
+
+      return {
+        id: `fleet-${tire.id}`,
+        // DESCARTE y no BAJA para no confundir la categoria con la prioridad BAJA.
+        category: atRepairLimit ? 'DESCARTE' : 'ROTACION',
+        priority: getPriority(item.score),
+        title: `${atRepairLimit ? 'Evaluar baja de' : 'Rotar'} goma ${tire.code}`,
+        action,
+        reason: `${reasonParts.join(', ')}.`,
+        from: currentPlace,
+        to: targetPlace,
+        tire: tireSummary(tire),
+        replacementTire: replacement ? tireSummary(replacement) : null,
+        confidence: item.brandAnalytics?.confidence || 'BAJA',
+        evidence: {
+          daysInCurrentPlace: item.daysInCurrentPlace,
+          movementCount: item.history.tireMovements.length,
+          repairEvents: item.history.repairEventCount,
+          brandDurabilityScore: item.brandAnalytics?.durabilityScore ?? null,
+          brandAverageDaysToRepair: item.brandAnalytics?.averageDaysToRepair ?? null,
+          brandAverageDaysToDiscard: item.brandAnalytics?.averageDaysToDiscard ?? null,
+          score: item.score,
+        },
+      };
+    });
+}
+
+function buildGomeriaRecommendations(gomeriaHistories, now) {
+  return gomeriaHistories
+    .map((history) => {
+      const lastArrival = findLastArrivalToCurrentPlace(history.tire, history.tireMovements);
+      const daysInGomeria = daysBetween(lastArrival?.createdAt || history.tire.createdAt, now);
+      return { history, daysInGomeria };
+    })
+    .filter((item) => item.daysInGomeria >= GOMERIA_STALE_DAYS)
+    .sort((a, b) => b.daysInGomeria - a.daysInGomeria)
+    .slice(0, 4)
+    .map((item) => {
+      const tire = item.history.tire;
+      const critical = item.daysInGomeria >= GOMERIA_CRITICAL_DAYS;
+
+      return {
+        id: `gomeria-${tire.id}`,
+        category: 'GOMERIA',
+        priority: critical ? 'ALTA' : 'MEDIA',
+        title: `Destrabar goma ${tire.code} en gomeria`,
+        action: `La goma ${tire.code} (${tire.brand} ${tire.size}) lleva ${item.daysInGomeria} dias en gomeria. Si ya esta reparada, devolverla a deposito para que vuelva a estar disponible; si no tiene arreglo, darla de baja.`,
+        reason: `Sin movimientos desde hace ${item.daysInGomeria} dias, ocupando gomeria y sin sumar al stock disponible.`,
+        from: 'Gomeria',
+        to: 'Deposito o baja',
+        tire: tireSummary(tire),
+        replacementTire: null,
+        confidence: 'ALTA',
+        evidence: {
+          daysInCurrentPlace: item.daysInGomeria,
+          movementCount: item.history.tireMovements.length,
+          repairEvents: item.history.repairEventCount,
+          brandDurabilityScore: null,
+          brandAverageDaysToRepair: null,
+          brandAverageDaysToDiscard: null,
+          score: item.daysInGomeria,
+        },
+      };
+    });
+}
+
+/**
+ * Medidas que estan rodando en la flota y no tienen ni una goma de repuesto libre
+ * en deposito. Es el aviso que evita quedar a pie cuando se pincha una.
+ */
+function buildStockRecommendations(fleetHistories, depositCandidates) {
+  const stockBySize = new Map();
+  for (const candidate of depositCandidates) {
+    const size = normalizeSize(candidate.size);
+    stockBySize.set(size, (stockBySize.get(size) || 0) + 1);
+  }
+
+  const fleetBySize = new Map();
+  for (const history of fleetHistories) {
+    const size = normalizeSize(history.tire.size);
+    const existing = fleetBySize.get(size) || { size: history.tire.size, count: 0 };
+    existing.count += 1;
+    fleetBySize.set(size, existing);
+  }
+
+  return Array.from(fleetBySize.entries())
+    .filter(([size]) => !stockBySize.get(size))
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 2)
+    .map(([size, info]) => ({
+      id: `stock-${size}`,
+      category: 'STOCK',
+      priority: info.count >= 8 ? 'ALTA' : 'MEDIA',
+      title: `Sin repuesto para medida ${info.size}`,
+      action: `Comprar o liberar al menos una goma medida ${info.size} para deposito. Hoy hay ${info.count} rodando en la flota y ninguna disponible como reemplazo.`,
+      reason: `${info.count} gomas de esta medida en tractores/semis y 0 libres en deposito.`,
+      from: null,
+      to: 'Deposito',
+      tire: null,
+      replacementTire: null,
+      confidence: 'ALTA',
+      evidence: {
+        daysInCurrentPlace: null,
+        movementCount: null,
+        repairEvents: null,
+        brandDurabilityScore: null,
+        brandAverageDaysToRepair: null,
+        brandAverageDaysToDiscard: null,
+        score: info.count,
+      },
+    }));
 }
 
 function buildFallbackRecommendation(tires, movements) {
@@ -416,8 +734,8 @@ function buildFallbackRecommendation(tires, movements) {
     category: 'CONTROL',
     priority: 'BAJA',
     title: 'Sin cambios urgentes esta semana',
-    action: 'Mantener las ubicaciones actuales y revisar nuevamente en el proximo cierre semanal.',
-    reason: `El analisis tomo ${tires.length} gomas y ${movements.length} movimientos, sin detectar rotaciones criticas.`,
+    action: 'Mantener las ubicaciones actuales y volver a revisar en el proximo cierre semanal.',
+    reason: `Se analizaron ${tires.length} gomas y ${movements.length} movimientos sin detectar rotaciones criticas.`,
     from: null,
     to: null,
     tire: null,
@@ -426,12 +744,16 @@ function buildFallbackRecommendation(tires, movements) {
     evidence: {
       daysInCurrentPlace: null,
       movementCount: movements.length,
+      repairEvents: null,
+      brandDurabilityScore: null,
       brandAverageDaysToRepair: null,
       brandAverageDaysToDiscard: null,
       score: 0,
     },
   };
 }
+
+const PRIORITY_ORDER = { ALTA: 0, MEDIA: 1, BAJA: 2 };
 
 async function generateSnapshotData(now) {
   const [tires, movements] = await Promise.all([
@@ -443,33 +765,58 @@ async function generateSnapshotData(now) {
       },
       orderBy: { createdAt: 'asc' },
     }),
-    prisma.movement.findMany({
-      orderBy: { createdAt: 'asc' },
-    }),
+    prisma.movement.findMany({ orderBy: { createdAt: 'asc' } }),
   ]);
 
   const movementsByTire = groupMovementsByTire(movements);
-  const brandAnalytics = buildBrandAnalytics(tires, movementsByTire, now);
+  const histories = tires.map((tire) => buildTireHistory(tire, movementsByTire.get(tire.id) || [], now));
+
+  const brandAnalytics = buildBrandAnalytics(histories);
   const analyticsByBrand = new Map(brandAnalytics.map((item) => [item.brand, item]));
-  const activeTires = tires.filter((tire) => tire.state !== TIRE_STATE.BAJA);
-  const fleetTires = activeTires.filter((tire) => tire.currentLocation === LOCATION_TYPE.TRACTOR || tire.currentLocation === LOCATION_TYPE.SEMI);
-  const depositCandidates = activeTires.filter((tire) => tire.currentLocation === LOCATION_TYPE.DEPOSIT && !isSpecialDeposit(tire));
-  const gomeriaTires = activeTires.filter((tire) => tire.currentLocation === LOCATION_TYPE.DEPOSIT && isGomeriaDepositName(tire.currentDeposit?.name));
+
+  const activeHistories = histories.filter((history) => history.tire.state !== TIRE_STATE.BAJA);
+  const fleetHistories = activeHistories.filter(
+    (history) =>
+      history.tire.currentLocation === LOCATION_TYPE.TRACTOR || history.tire.currentLocation === LOCATION_TYPE.SEMI,
+  );
+  const depositCandidates = activeHistories
+    .filter((history) => history.tire.currentLocation === LOCATION_TYPE.DEPOSIT && !isSpecialDeposit(history.tire))
+    .map((history) => history.tire);
+  const gomeriaHistories = activeHistories.filter(
+    (history) =>
+      history.tire.currentLocation === LOCATION_TYPE.DEPOSIT && isGomeriaDepositName(history.tire.currentDeposit?.name),
+  );
+
+  // Se limita cada categoria para que la lista no quede tapada por un solo tipo
+  // de problema y el encargado vea flota, gomeria y stock en la misma pantalla.
   const recommendations = [
-    ...buildFleetRecommendations(fleetTires, depositCandidates, movementsByTire, analyticsByBrand, now),
-    ...buildGomeriaRecommendations(gomeriaTires, movementsByTire, now),
-  ].slice(0, MAX_RECOMMENDATIONS);
+    ...buildFleetRecommendations(fleetHistories, depositCandidates, analyticsByBrand, now).slice(0, 5),
+    ...buildGomeriaRecommendations(gomeriaHistories, now).slice(0, 3),
+    ...buildStockRecommendations(fleetHistories, depositCandidates).slice(0, 2),
+  ]
+    .sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority] || b.evidence.score - a.evidence.score)
+    .slice(0, MAX_RECOMMENDATIONS);
+
+  const trackingStart = tires.length ? tires[0].createdAt : null;
 
   return {
     recommendations: recommendations.length ? recommendations : [buildFallbackRecommendation(tires, movements)],
     brandAnalytics,
+    brandRanking: buildBrandRanking(brandAnalytics),
+    dataQuality: {
+      possibleBrandDuplicates: findPossibleBrandDuplicates(brandAnalytics),
+    },
     sourceStats: {
+      schemaVersion: SNAPSHOT_SCHEMA_VERSION,
       totalTires: tires.length,
-      activeTires: activeTires.length,
-      fleetTires: fleetTires.length,
+      activeTires: activeHistories.length,
+      fleetTires: fleetHistories.length,
       depositCandidates: depositCandidates.length,
+      gomeriaTires: gomeriaHistories.length,
       movements: movements.length,
-      engine: 'weekly-local-ai-analysis',
+      trackingStart,
+      trackingDays: trackingStart ? daysBetween(trackingStart, now) : 0,
+      engine: 'weekly-local-analysis-v2',
     },
   };
 }
@@ -477,6 +824,7 @@ async function generateSnapshotData(now) {
 function buildSummary(snapshot) {
   const recommendations = Array.isArray(snapshot.recommendations) ? snapshot.recommendations : [];
   const brandAnalytics = Array.isArray(snapshot.brandAnalytics) ? snapshot.brandAnalytics : [];
+
   return {
     recommendationsCount: recommendations.length,
     highPriorityCount: recommendations.filter((item) => item.priority === 'ALTA').length,
@@ -494,45 +842,63 @@ function serializeSnapshot(snapshot, wasGeneratedNow) {
     wasGeneratedNow,
     recommendations: snapshot.recommendations,
     brandAnalytics: snapshot.brandAnalytics,
+    brandRanking: snapshot.sourceStats?.brandRanking || { best: [], worst: [], eligibleCount: 0, excludedForLowEvidence: 0 },
+    dataQuality: snapshot.sourceStats?.dataQuality || { possibleBrandDuplicates: [] },
     sourceStats: snapshot.sourceStats,
     summary: buildSummary(snapshot),
   };
 }
 
+function isStale(snapshot) {
+  return (snapshot.sourceStats?.schemaVersion || 1) !== SNAPSHOT_SCHEMA_VERSION;
+}
+
+async function persistSnapshot(weekKey, validUntil, now) {
+  const snapshotData = await generateSnapshotData(now);
+  const payload = {
+    generatedAt: now,
+    validUntil,
+    recommendations: snapshotData.recommendations,
+    brandAnalytics: snapshotData.brandAnalytics,
+    // brandRanking y dataQuality viajan dentro de sourceStats (Json) para no
+    // tener que migrar la tabla en produccion por campos derivados.
+    sourceStats: {
+      ...snapshotData.sourceStats,
+      brandRanking: snapshotData.brandRanking,
+      dataQuality: snapshotData.dataQuality,
+    },
+  };
+
+  return prisma.aiRecommendationSnapshot.upsert({
+    where: { weekKey },
+    create: { weekKey, ...payload },
+    update: payload,
+  });
+}
+
 async function getWeeklyRecommendations() {
   const now = new Date();
-  const weekStart = startOfWeek(now);
-  const validUntil = addDays(weekStart, 7);
-  const weekKey = formatDateKey(weekStart);
+  const { weekKey, validUntil } = getWeekInfo(now);
   const existing = await prisma.aiRecommendationSnapshot.findUnique({ where: { weekKey } });
 
-  if (existing) {
+  if (existing && !isStale(existing)) {
     return serializeSnapshot(existing, false);
   }
 
-  const snapshotData = await generateSnapshotData(now);
-  const snapshot = await prisma.aiRecommendationSnapshot.upsert({
-    where: { weekKey },
-    create: {
-      weekKey,
-      generatedAt: now,
-      validUntil,
-      recommendations: snapshotData.recommendations,
-      brandAnalytics: snapshotData.brandAnalytics,
-      sourceStats: snapshotData.sourceStats,
-    },
-    update: {
-      generatedAt: now,
-      validUntil,
-      recommendations: snapshotData.recommendations,
-      brandAnalytics: snapshotData.brandAnalytics,
-      sourceStats: snapshotData.sourceStats,
-    },
-  });
+  const snapshot = await persistSnapshot(weekKey, validUntil, now);
+  return serializeSnapshot(snapshot, true);
+}
 
+async function regenerateWeeklyRecommendations() {
+  const now = new Date();
+  const { weekKey, validUntil } = getWeekInfo(now);
+  const snapshot = await persistSnapshot(weekKey, validUntil, now);
   return serializeSnapshot(snapshot, true);
 }
 
 module.exports = {
   getWeeklyRecommendations,
+  regenerateWeeklyRecommendations,
+  // Expuesto para inspeccion/diagnostico sin escribir en la base.
+  generateSnapshotData,
 };

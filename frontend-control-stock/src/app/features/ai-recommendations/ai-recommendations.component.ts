@@ -1,11 +1,21 @@
 import { CommonModule, DatePipe, NgFor, NgIf } from '@angular/common';
 import { Component, OnInit, inject } from '@angular/core';
+import { AuthService } from '../../core/services/auth.service';
 import {
   AiRecommendation,
   AiRecommendationResponse,
   AiRecommendationService,
   BrandAnalytics,
+  RecommendationCategory,
 } from '../../core/services/ai-recommendation.service';
+
+const CATEGORY_LABELS: Record<RecommendationCategory, string> = {
+  ROTACION: 'Rotacion',
+  DESCARTE: 'Descarte',
+  GOMERIA: 'Gomeria',
+  STOCK: 'Stock',
+  CONTROL: 'Control',
+};
 
 @Component({
   selector: 'app-ai-recommendations',
@@ -16,7 +26,9 @@ import {
       <div>
         <span class="eyebrow">Recomendaciones IA</span>
         <h2>Analisis semanal de cambios y duracion por marca</h2>
-        <p class="section-copy">Sugerencias generadas desde el historial de gomas, ubicaciones actuales y movimientos registrados.</p>
+        <p class="section-copy">
+          Sugerencias generadas desde el historial de gomas, ubicaciones actuales y movimientos registrados.
+        </p>
       </div>
     </section>
 
@@ -34,13 +46,13 @@ import {
         </article>
         <article class="stat-card">
           <span>Ultima actualizacion</span>
-          <strong class="date-stat">{{ snapshot.generatedAt | date:'dd/MM' }}</strong>
-          <small>{{ snapshot.wasGeneratedNow ? 'Generada ahora' : 'Cache semanal vigente' }}</small>
+          <strong class="date-stat">{{ snapshot.generatedAt | date : 'dd/MM' }}</strong>
+          <small>{{ snapshot.wasGeneratedNow ? 'Generada ahora' : 'Vigente toda la semana' }}</small>
         </article>
         <article class="stat-card">
           <span>Proxima revision</span>
-          <strong class="date-stat">{{ snapshot.validUntil | date:'dd/MM' }}</strong>
-          <small>Se recalcula por semana</small>
+          <strong class="date-stat">{{ snapshot.validUntil | date : 'dd/MM' }}</strong>
+          <small>Se recalcula cada lunes</small>
         </article>
       </section>
 
@@ -49,15 +61,34 @@ import {
           <div class="panel-head">
             <h3>Cambios recomendados</h3>
             <div class="panel-actions">
-              <span class="chip">Semana {{ snapshot.weekKey }}</span>
-              <button class="secondary-button compact-action" type="button" (click)="load()">Actualizar</button>
+              <span class="chip">Semana del {{ snapshot.weekKey }}</span>
+              <button class="secondary-button compact-action" type="button" [disabled]="loading" (click)="load()">
+                Refrescar
+              </button>
+              <button
+                *ngIf="isAdmin"
+                class="secondary-button compact-action"
+                type="button"
+                [disabled]="loading"
+                (click)="regenerate()"
+              >
+                {{ loading ? 'Recalculando...' : 'Recalcular ahora' }}
+              </button>
             </div>
           </div>
 
           <div class="recommendation-list">
-            <div class="recommendation-item" *ngFor="let recommendation of snapshot.recommendations; trackBy: trackRecommendation">
+            <div
+              class="recommendation-item"
+              *ngFor="let recommendation of snapshot.recommendations; trackBy: trackRecommendation"
+            >
               <div class="recommendation-top">
-                <span class="priority-pill" [ngClass]="priorityClass(recommendation.priority)">{{ recommendation.priority }}</span>
+                <div class="pill-group">
+                  <span class="priority-pill" [ngClass]="priorityClass(recommendation.priority)">
+                    {{ recommendation.priority }}
+                  </span>
+                  <span class="category-pill">{{ categoryLabel(recommendation.category) }}</span>
+                </div>
                 <span class="confidence-pill">Confianza {{ recommendation.confidence.toLowerCase() }}</span>
               </div>
 
@@ -85,17 +116,28 @@ import {
                   <small>{{ tire.model }} | {{ tire.size }} | {{ formatState(tire.state, tire.repairType) }}</small>
                 </div>
                 <div class="tire-mini replacement" *ngIf="recommendation.replacementTire as replacement">
-                  <span>Reemplazo sugerido</span>
+                  <span>Reemplazo sugerido (misma medida)</span>
                   <strong>{{ replacement.code }} | {{ replacement.brand }}</strong>
-                  <small>{{ replacement.model }} | {{ replacement.size }} | {{ formatState(replacement.state, replacement.repairType) }}</small>
+                  <small>
+                    {{ replacement.model }} | {{ replacement.size }} |
+                    {{ formatState(replacement.state, replacement.repairType) }}
+                  </small>
                 </div>
               </div>
 
               <div class="evidence-strip">
-                <span>{{ formatDays(recommendation.evidence.daysInCurrentPlace) }} en ubicacion</span>
-                <span>{{ recommendation.evidence.movementCount || 0 }} movimientos</span>
-                <span>Reparacion prom.: {{ formatDays(recommendation.evidence.brandAverageDaysToRepair) }}</span>
-                <span>Baja prom.: {{ formatDays(recommendation.evidence.brandAverageDaysToDiscard) }}</span>
+                <span *ngIf="recommendation.evidence.daysInCurrentPlace !== null">
+                  {{ formatDays(recommendation.evidence.daysInCurrentPlace) }} en ubicacion
+                </span>
+                <span *ngIf="recommendation.evidence.movementCount !== null">
+                  {{ recommendation.evidence.movementCount }} movimientos
+                </span>
+                <span *ngIf="recommendation.evidence.repairEvents">
+                  {{ recommendation.evidence.repairEvents }} reparaciones registradas
+                </span>
+                <span *ngIf="recommendation.evidence.brandDurabilityScore !== null">
+                  Durabilidad de la marca: {{ recommendation.evidence.brandDurabilityScore }}/100
+                </span>
               </div>
             </div>
           </div>
@@ -107,24 +149,56 @@ import {
             <span class="chip">{{ snapshot.brandAnalytics.length }} marcas</span>
           </div>
 
-          <div class="brand-highlight-list" *ngIf="topBrands.length">
-            <div class="brand-highlight-row" *ngFor="let brand of topBrands; trackBy: trackBrand">
-              <div>
-                <strong>{{ brand.brand }}</strong>
-                <span>{{ brand.insight }}</span>
+          <p class="analysis-note">
+            Medido sobre {{ snapshot.sourceStats?.trackingDays || 0 }} dias de historial (desde
+            {{ snapshot.sourceStats?.trackingStart | date : 'dd/MM/yyyy' }}). El puntaje baja cuando la marca acumula
+            reparaciones, bajas y niveles de reparacion altos.
+          </p>
+
+          <div class="ranking-block" *ngIf="snapshot.brandRanking?.best?.length">
+            <h4 class="ranking-title good">Las que mas aguantan</h4>
+            <div class="brand-highlight-list">
+              <div class="brand-highlight-row" *ngFor="let brand of snapshot.brandRanking.best; trackBy: trackBrand">
+                <div>
+                  <strong>{{ brand.brand }}</strong>
+                  <span>{{ brand.insight }}</span>
+                </div>
+                <b>{{ brand.durabilityScore }}/100</b>
               </div>
-              <b>{{ formatDays(brand.durabilityScore) }}</b>
             </div>
           </div>
+
+          <div class="ranking-block" *ngIf="snapshot.brandRanking?.worst?.length">
+            <h4 class="ranking-title bad">Las que mas problemas dan</h4>
+            <div class="brand-highlight-list">
+              <div
+                class="brand-highlight-row negative"
+                *ngFor="let brand of snapshot.brandRanking.worst; trackBy: trackBrand"
+              >
+                <div>
+                  <strong>{{ brand.brand }}</strong>
+                  <span>{{ brand.insight }}</span>
+                </div>
+                <b>{{ brand.durabilityScore }}/100</b>
+              </div>
+            </div>
+          </div>
+
+          <p class="analysis-note" *ngIf="snapshot.brandRanking?.excludedForLowEvidence">
+            {{ snapshot.brandRanking.excludedForLowEvidence }} marcas quedaron fuera del ranking por tener todavia poca
+            evidencia (pocas gomas o poco tiempo cargadas). Igual aparecen en la tabla.
+          </p>
 
           <div class="table-wrapper analytics-table-wrapper">
             <table>
               <thead>
                 <tr>
                   <th>Marca</th>
-                  <th>Hasta reparar</th>
-                  <th>Hasta baja</th>
-                  <th>Mayor duracion</th>
+                  <th>Durabilidad</th>
+                  <th>Reparadas</th>
+                  <th>Nivel prom.</th>
+                  <th>Bajas</th>
+                  <th>Sin incidentes</th>
                   <th>Muestra</th>
                 </tr>
               </thead>
@@ -134,16 +208,43 @@ import {
                     <strong>{{ brand.brand }}</strong>
                     <div class="table-note">Confianza {{ brand.confidence.toLowerCase() }}</div>
                   </td>
-                  <td>{{ formatDays(brand.averageDaysToRepair) }}</td>
-                  <td>{{ formatDays(brand.averageDaysToDiscard) }}</td>
                   <td>
-                    <strong>{{ brand.longestTire?.code || '-' }}</strong>
-                    <div class="table-note">{{ formatDays(brand.longestTire?.days || null) }}</div>
+                    <div class="score-cell">
+                      <b>{{ brand.durabilityScore }}</b>
+                      <div class="score-bar" [attr.aria-label]="brand.durabilityScore + ' de 100'">
+                        <i [style.width.%]="brand.durabilityScore" [ngClass]="scoreClass(brand.durabilityScore)"></i>
+                      </div>
+                    </div>
                   </td>
-                  <td>{{ brand.tireCount }} gomas</td>
+                  <td>{{ brand.repairShare }}%</td>
+                  <td>{{ brand.averageRepairLevel !== null ? brand.averageRepairLevel : '-' }}</td>
+                  <td>{{ brand.discardedCount }}</td>
+                  <td>{{ formatDays(brand.averageDaysWithoutIncident) }}</td>
+                  <td>
+                    {{ brand.tireCount }} gomas
+                    <div class="table-note">{{ brand.averageObservedDays }} dias prom.</div>
+                  </td>
                 </tr>
               </tbody>
             </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel-grid" *ngIf="snapshot.dataQuality?.possibleBrandDuplicates?.length">
+        <article class="panel-card">
+          <div class="panel-head">
+            <h3>Marcas que conviene unificar</h3>
+            <span class="chip">{{ snapshot.dataQuality.possibleBrandDuplicates.length }} detectadas</span>
+          </div>
+          <p class="analysis-note">
+            Estas marcas estan cargadas con nombres parecidos y se analizan por separado. No se tocan solas: hay que
+            corregirlas a mano desde la pantalla Gomas.
+          </p>
+          <div class="duplicate-list">
+            <div class="duplicate-row" *ngFor="let warning of snapshot.dataQuality.possibleBrandDuplicates">
+              {{ warning.message }}
+            </div>
           </div>
         </article>
       </section>
@@ -154,7 +255,9 @@ import {
         <article class="panel-card">
           <div class="panel-head">
             <h3>{{ loading ? 'Calculando recomendaciones' : 'No se pudo cargar el analisis' }}</h3>
-            <button class="secondary-button compact-action" *ngIf="!loading" type="button" (click)="load()">Reintentar</button>
+            <button class="secondary-button compact-action" *ngIf="!loading" type="button" (click)="load()">
+              Reintentar
+            </button>
           </div>
           <p class="empty-state">{{ loading ? 'Analizando historial, ubicaciones y marcas...' : errorMessage }}</p>
         </article>
@@ -206,7 +309,8 @@ import {
       .recommendation-top,
       .evidence-strip,
       .tire-pair,
-      .recommendation-route {
+      .recommendation-route,
+      .pill-group {
         display: flex;
         gap: 0.65rem;
         flex-wrap: wrap;
@@ -219,6 +323,7 @@ import {
 
       .priority-pill,
       .confidence-pill,
+      .category-pill,
       .evidence-strip span {
         display: inline-flex;
         align-items: center;
@@ -227,7 +332,8 @@ import {
       }
 
       .priority-pill,
-      .confidence-pill {
+      .confidence-pill,
+      .category-pill {
         padding: 0.34rem 0.72rem;
         font-size: 0.78rem;
       }
@@ -246,6 +352,11 @@ import {
       .confidence-pill {
         color: var(--primary-dark);
         background: rgba(13, 143, 134, 0.11);
+      }
+
+      .category-pill {
+        color: var(--muted);
+        background: rgba(16, 32, 51, 0.07);
       }
 
       .recommendation-item h4,
@@ -276,7 +387,8 @@ import {
 
       .recommendation-route div,
       .tire-mini,
-      .brand-highlight-row {
+      .brand-highlight-row,
+      .duplicate-row {
         padding: 0.85rem;
         border-radius: 16px;
         background: rgba(13, 143, 134, 0.08);
@@ -317,8 +429,28 @@ import {
         font-size: 0.78rem;
       }
 
-      .brand-highlight-list {
-        margin-bottom: 1rem;
+      .analysis-note {
+        margin: 0 0 1rem;
+        color: var(--muted);
+        font-size: 0.86rem;
+        line-height: 1.5;
+      }
+
+      .ranking-block {
+        margin-bottom: 1.1rem;
+      }
+
+      .ranking-title {
+        margin: 0 0 0.6rem;
+        font-size: 0.92rem;
+      }
+
+      .ranking-title.good {
+        color: var(--primary-dark);
+      }
+
+      .ranking-title.bad {
+        color: #8b2a2a;
       }
 
       .brand-highlight-row {
@@ -328,9 +460,60 @@ import {
         gap: 1rem;
       }
 
+      .brand-highlight-row.negative {
+        background: rgba(196, 74, 74, 0.09);
+        border-color: rgba(196, 74, 74, 0.14);
+      }
+
       .brand-highlight-row b {
         white-space: nowrap;
         color: var(--primary-dark);
+      }
+
+      .brand-highlight-row.negative b {
+        color: #8b2a2a;
+      }
+
+      .score-cell {
+        display: grid;
+        gap: 0.3rem;
+        min-width: 92px;
+      }
+
+      .score-bar {
+        height: 6px;
+        border-radius: 999px;
+        background: rgba(16, 32, 51, 0.09);
+        overflow: hidden;
+      }
+
+      .score-bar i {
+        display: block;
+        height: 100%;
+        border-radius: 999px;
+      }
+
+      .score-bar i.score-good {
+        background: var(--primary-dark);
+      }
+
+      .score-bar i.score-mid {
+        background: #e0a02e;
+      }
+
+      .score-bar i.score-bad {
+        background: #c44a4a;
+      }
+
+      .duplicate-list {
+        display: grid;
+        gap: 0.75rem;
+      }
+
+      .duplicate-row {
+        background: rgba(255, 183, 77, 0.16);
+        border-color: rgba(255, 183, 77, 0.22);
+        line-height: 1.5;
       }
 
       .analytics-table-wrapper {
@@ -363,13 +546,14 @@ import {
 })
 export class AiRecommendationsComponent implements OnInit {
   private readonly aiRecommendationService = inject(AiRecommendationService);
+  private readonly authService = inject(AuthService);
 
   data: AiRecommendationResponse | null = null;
   loading = false;
   errorMessage = '';
 
-  get topBrands(): BrandAnalytics[] {
-    return (this.data?.brandAnalytics || []).slice(0, 3);
+  get isAdmin(): boolean {
+    return this.authService.getCurrentUser()?.role === 'ADMIN';
   }
 
   ngOnInit(): void {
@@ -377,17 +561,33 @@ export class AiRecommendationsComponent implements OnInit {
   }
 
   load(): void {
+    this.request(false);
+  }
+
+  regenerate(): void {
+    this.request(true);
+  }
+
+  private request(force: boolean): void {
     this.loading = true;
     this.errorMessage = '';
-    this.aiRecommendationService.getWeeklyRecommendations().subscribe({
+
+    const source = force
+      ? this.aiRecommendationService.regenerate()
+      : this.aiRecommendationService.getWeeklyRecommendations();
+
+    source.subscribe({
       next: (data) => {
         this.data = data;
         this.loading = false;
       },
       error: (error) => {
-        this.data = null;
         this.loading = false;
-        this.errorMessage = error.error?.message || 'El analisis IA no esta disponible en este momento.';
+        // Si ya habia un analisis cargado se deja en pantalla: es mejor mostrar
+        // el ultimo dato bueno que vaciar la vista por un error de red.
+        if (!this.data) {
+          this.errorMessage = error.error?.message || 'El analisis no esta disponible en este momento.';
+        }
       },
     });
   }
@@ -400,6 +600,10 @@ export class AiRecommendationsComponent implements OnInit {
     return brand.brand;
   }
 
+  categoryLabel(category: RecommendationCategory): string {
+    return CATEGORY_LABELS[category] || category;
+  }
+
   priorityClass(priority: AiRecommendation['priority']): string {
     if (priority === 'ALTA') {
       return 'priority-high';
@@ -410,6 +614,18 @@ export class AiRecommendationsComponent implements OnInit {
     }
 
     return 'priority-low';
+  }
+
+  scoreClass(score: number): string {
+    if (score >= 75) {
+      return 'score-good';
+    }
+
+    if (score >= 50) {
+      return 'score-mid';
+    }
+
+    return 'score-bad';
   }
 
   formatDays(value: number | null | undefined): string {

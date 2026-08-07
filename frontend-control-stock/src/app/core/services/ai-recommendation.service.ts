@@ -14,9 +14,11 @@ export interface AiRecommendationTire {
   location: string;
 }
 
+export type RecommendationCategory = 'ROTACION' | 'DESCARTE' | 'GOMERIA' | 'STOCK' | 'CONTROL';
+
 export interface AiRecommendation {
   id: string;
-  category: string;
+  category: RecommendationCategory;
   priority: 'ALTA' | 'MEDIA' | 'BAJA';
   title: string;
   action: string;
@@ -29,6 +31,8 @@ export interface AiRecommendation {
   evidence: {
     daysInCurrentPlace: number | null;
     movementCount: number | null;
+    repairEvents: number | null;
+    brandDurabilityScore: number | null;
     brandAverageDaysToRepair: number | null;
     brandAverageDaysToDiscard: number | null;
     score: number | null;
@@ -37,12 +41,22 @@ export interface AiRecommendation {
 
 export interface BrandAnalytics {
   brand: string;
+  aliases: string[];
   tireCount: number;
   repairedCount: number;
+  arrivedRepairedCount: number;
+  trackedRepairEvents: number;
   discardedCount: number;
+  repairShare: number;
+  discardShare: number;
+  averageRepairLevel: number | null;
   averageDaysToRepair: number | null;
+  averageDaysToRepairSample: number;
   averageDaysToDiscard: number | null;
-  averageObservedDays: number | null;
+  averageDaysToDiscardSample: number;
+  averageDaysWithoutIncident: number | null;
+  averageObservedDays: number;
+  observedTireDays: number;
   durabilityScore: number;
   confidence: 'ALTA' | 'MEDIA' | 'BAJA';
   insight: string;
@@ -57,6 +71,21 @@ export interface BrandAnalytics {
   } | null;
 }
 
+export interface BrandRanking {
+  best: BrandAnalytics[];
+  worst: BrandAnalytics[];
+  eligibleCount: number;
+  excludedForLowEvidence: number;
+}
+
+export interface BrandDuplicateWarning {
+  brand: string;
+  possibleDuplicate: string;
+  brandTires: number;
+  duplicateTires: number;
+  message: string;
+}
+
 export interface AiRecommendationResponse {
   id: string;
   weekKey: string;
@@ -65,12 +94,20 @@ export interface AiRecommendationResponse {
   wasGeneratedNow: boolean;
   recommendations: AiRecommendation[];
   brandAnalytics: BrandAnalytics[];
+  brandRanking: BrandRanking;
+  dataQuality: {
+    possibleBrandDuplicates: BrandDuplicateWarning[];
+  };
   sourceStats: {
+    schemaVersion: number;
     totalTires: number;
     activeTires: number;
     fleetTires: number;
     depositCandidates: number;
+    gomeriaTires: number;
     movements: number;
+    trackingStart: string | null;
+    trackingDays: number;
     engine: string;
   } | null;
   summary: {
@@ -87,5 +124,10 @@ export class AiRecommendationService {
 
   getWeeklyRecommendations(): Observable<AiRecommendationResponse> {
     return this.http.get<AiRecommendationResponse>(`${environment.apiUrl}/recomendaciones-ia`);
+  }
+
+  /** Solo ADMIN: fuerza un recalculo sin esperar al corte semanal. */
+  regenerate(): Observable<AiRecommendationResponse> {
+    return this.http.post<AiRecommendationResponse>(`${environment.apiUrl}/recomendaciones-ia/recalcular`, {});
   }
 }
