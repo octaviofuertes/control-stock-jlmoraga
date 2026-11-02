@@ -46,12 +46,12 @@ const CATEGORY_LABELS: Record<RecommendationCategory, string> = {
         </article>
         <article class="stat-card">
           <span>Ultima actualizacion</span>
-          <strong class="date-stat">{{ snapshot.generatedAt | date : 'dd/MM' }}</strong>
+          <strong class="date-stat">{{ snapshot.generatedAt | date : 'dd/MM/yyyy' }}</strong>
           <small>{{ snapshot.wasGeneratedNow ? 'Generada ahora' : 'Vigente toda la semana' }}</small>
         </article>
         <article class="stat-card">
           <span>Proxima revision</span>
-          <strong class="date-stat">{{ snapshot.validUntil | date : 'dd/MM' }}</strong>
+          <strong class="date-stat">{{ snapshot.validUntil | date : 'dd/MM/yyyy' }}</strong>
           <small>Se recalcula cada lunes</small>
         </article>
       </section>

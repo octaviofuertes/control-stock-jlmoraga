@@ -3,6 +3,62 @@ const { AppError } = require('../utils/errors');
 const { normalizeText, requireFields } = require('../utils/helpers');
 
 const DEFAULT_OIL_KEY = 'main';
+const LATEST_MOVEMENTS_SAMPLE = 50;
+// Clics seguidos de la misma persona con menos de este intervalo se muestran como un solo movimiento.
+const MOVEMENT_GROUP_GAP_MS = 10 * 60 * 1000;
+
+const latestMovementsInclude = {
+  movements: {
+    take: LATEST_MOVEMENTS_SAMPLE,
+    orderBy: { createdAt: 'desc' },
+    include: {
+      user: {
+        select: {
+          name: true,
+        },
+      },
+    },
+  },
+};
+
+// Agrupa los ultimos movimientos consecutivos del mismo usuario y la misma accion (ordenados desc).
+function summarizeLatestMovement(movements) {
+  if (!movements.length) {
+    return null;
+  }
+
+  const [latest] = movements;
+  let quantity = 0;
+  let previousTime = new Date(latest.createdAt).getTime();
+
+  for (const movement of movements) {
+    const movementTime = new Date(movement.createdAt).getTime();
+    const sameRun = movement.userId === latest.userId && movement.action === latest.action;
+    if (!sameRun || previousTime - movementTime > MOVEMENT_GROUP_GAP_MS) {
+      break;
+    }
+
+    quantity += movement.quantity;
+    previousTime = movementTime;
+  }
+
+  return {
+    id: latest.id,
+    action: latest.action,
+    quantity,
+    resultingStock: latest.resultingStock,
+    createdAt: latest.createdAt,
+    userName: latest.user.name,
+  };
+}
+
+function serializeSpareItem(item) {
+  const { movements, ...rest } = item;
+  return {
+    ...rest,
+    latestMovement: summarizeLatestMovement(movements || []),
+  };
+}
 
 async function ensureOilStock() {
   const existing = await prisma.oilStock.findUnique({ where: { key: DEFAULT_OIL_KEY } });
@@ -24,37 +80,13 @@ async function getWarehouseState() {
     ensureOilStock(),
     prisma.spareItem.findMany({
       orderBy: [{ category: 'asc' }, { name: 'asc' }, { createdAt: 'desc' }],
-      include: {
-        movements: {
-          take: 1,
-          orderBy: { createdAt: 'desc' },
-          include: {
-            user: {
-              select: {
-                name: true,
-              },
-            },
-          },
-        },
-      },
+      include: latestMovementsInclude,
     }),
   ]);
 
   return {
     oil,
-    items: items.map((item) => ({
-      ...item,
-      latestMovement: item.movements[0]
-        ? {
-            id: item.movements[0].id,
-            action: item.movements[0].action,
-            quantity: item.movements[0].quantity,
-            resultingStock: item.movements[0].resultingStock,
-            createdAt: item.movements[0].createdAt,
-            userName: item.movements[0].user.name,
-          }
-        : null,
-    })),
+    items: items.map(serializeSpareItem),
   };
 }
 
@@ -82,41 +114,45 @@ async function createSpareItem(payload) {
 }
 
 async function updateSpareItemStock(id, payload, user) {
-  const item = await prisma.spareItem.findUnique({ where: { id } });
-  if (!item) {
-    throw new AppError('Repuesto no encontrado.', 404);
-  }
-
-  const delta = Number(payload.delta);
+  const delta = Math.trunc(Number(payload.delta));
   if (!Number.isFinite(delta) || delta === 0) {
     throw new AppError('Debes indicar un cambio de stock valido.');
   }
 
-  const nextStock = item.stock + Math.trunc(delta);
-  if (nextStock < 0) {
-    throw new AppError('No puedes dejar el stock del repuesto en negativo.');
-  }
+  return prisma.$transaction(async (tx) => {
+    const item = await tx.spareItem.findUnique({ where: { id } });
+    if (!item) {
+      throw new AppError('Repuesto no encontrado.', 404);
+    }
 
-  const result = await prisma.$transaction(async (tx) => {
-    const updatedItem = await tx.spareItem.update({
-      where: { id },
-      data: { stock: nextStock },
+    // Descuento condicional para que dos usuarios a la vez no dejen el stock en negativo.
+    const { count } = await tx.spareItem.updateMany({
+      where: delta < 0 ? { id, stock: { gte: -delta } } : { id },
+      data: { stock: { increment: delta } },
     });
+    if (!count) {
+      throw new AppError('No puedes dejar el stock del repuesto en negativo.');
+    }
+
+    const updatedItem = await tx.spareItem.findUnique({ where: { id } });
 
     await tx.spareItemMovement.create({
       data: {
         spareItemId: item.id,
         userId: user.id,
         action: delta > 0 ? 'ADD' : 'REMOVE',
-        quantity: Math.abs(Math.trunc(delta)),
-        resultingStock: nextStock,
+        quantity: Math.abs(delta),
+        resultingStock: updatedItem.stock,
       },
     });
 
-    return updatedItem;
-  });
+    const withMovements = await tx.spareItem.findUnique({
+      where: { id },
+      include: latestMovementsInclude,
+    });
 
-  return result;
+    return serializeSpareItem(withMovements);
+  });
 }
 
 async function deleteSpareItem(id) {
@@ -164,4 +200,5 @@ module.exports = {
   updateSpareItemStock,
   deleteSpareItem,
   updateOilStock,
+  summarizeLatestMovement,
 };

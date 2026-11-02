@@ -1,9 +1,12 @@
 import { CommonModule, DatePipe } from '@angular/common';
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { AuthService } from '../../core/services/auth.service';
 import { NotificationService } from '../../core/services/notification.service';
 import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '../../core/services/parts-warehouse.service';
+
+// Los clics seguidos sobre un repuesto se envian juntos como un unico movimiento.
+const STOCK_BATCH_DELAY_MS = 700;
 
 @Component({
   selector: 'app-parts-warehouse',
@@ -116,7 +119,7 @@ import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '
         </div>
 
         <div class="parts-list-scroll">
-          <article class="spare-item-card" *ngFor="let item of focos">
+          <article class="spare-item-card" *ngFor="let item of focos; trackBy: trackById">
             <div>
               <strong>{{ item.name }}</strong>
               <p>Stock actual en almacen</p>
@@ -125,15 +128,15 @@ import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '
                 <ng-container *ngIf="item.latestMovement; else noFocoMovement">
                   {{ item.latestMovement.action === 'ADD' ? '+' : '-' }}{{ item.latestMovement.quantity }}
                   por {{ item.latestMovement.userName }}
-                  | {{ item.latestMovement.createdAt | date:'short' }}
+                  | {{ item.latestMovement.createdAt | date:'dd/MM/yyyy HH:mm' }}
                 </ng-container>
                 <ng-template #noFocoMovement>Sin movimientos</ng-template>
               </small>
             </div>
             <div class="spare-stock-controls">
-              <button class="stock-stepper" type="button" (click)="changeStock(item.id, -1)">-</button>
+              <button class="stock-stepper" type="button" (click)="changeStock(item, -1)">-</button>
               <span class="spare-stock-value">{{ item.stock }}</span>
-              <button class="stock-stepper" type="button" (click)="changeStock(item.id, 1)">+</button>
+              <button class="stock-stepper" type="button" (click)="changeStock(item, 1)">+</button>
               <button *ngIf="isAdmin" class="ghost-button danger compact-delete" type="button" (click)="deleteItem(item)">Borrar</button>
             </div>
           </article>
@@ -158,7 +161,7 @@ import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '
         </div>
 
         <div class="parts-list-scroll">
-          <article class="spare-item-card" *ngFor="let item of ferreteria">
+          <article class="spare-item-card" *ngFor="let item of ferreteria; trackBy: trackById">
             <div>
               <strong>{{ item.name }}</strong>
               <p>Stock actual en almacen</p>
@@ -167,15 +170,15 @@ import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '
                 <ng-container *ngIf="item.latestMovement; else noHardwareMovement">
                   {{ item.latestMovement.action === 'ADD' ? '+' : '-' }}{{ item.latestMovement.quantity }}
                   por {{ item.latestMovement.userName }}
-                  | {{ item.latestMovement.createdAt | date:'short' }}
+                  | {{ item.latestMovement.createdAt | date:'dd/MM/yyyy HH:mm' }}
                 </ng-container>
                 <ng-template #noHardwareMovement>Sin movimientos</ng-template>
               </small>
             </div>
             <div class="spare-stock-controls">
-              <button class="stock-stepper" type="button" (click)="changeStock(item.id, -1)">-</button>
+              <button class="stock-stepper" type="button" (click)="changeStock(item, -1)">-</button>
               <span class="spare-stock-value">{{ item.stock }}</span>
-              <button class="stock-stepper" type="button" (click)="changeStock(item.id, 1)">+</button>
+              <button class="stock-stepper" type="button" (click)="changeStock(item, 1)">+</button>
               <button *ngIf="isAdmin" class="ghost-button danger compact-delete" type="button" (click)="deleteItem(item)">Borrar</button>
             </div>
           </article>
@@ -533,13 +536,16 @@ import { OilStockState, PartsWarehouseService, SpareCategory, SpareItem } from '
     }
   `],
 })
-export class PartsWarehouseComponent implements OnInit {
+export class PartsWarehouseComponent implements OnInit, OnDestroy {
   private readonly fb = inject(FormBuilder);
   private readonly authService = inject(AuthService);
   private readonly notificationService = inject(NotificationService);
   private readonly warehouseService = inject(PartsWarehouseService);
 
   items: SpareItem[] = [];
+  private readonly pendingDeltas = new Map<string, number>();
+  private readonly flushTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly inFlightItems = new Set<string>();
   oil: OilStockState = {
     id: '',
     key: 'main',
@@ -579,6 +585,18 @@ export class PartsWarehouseComponent implements OnInit {
     this.loadState();
   }
 
+  ngOnDestroy(): void {
+    for (const [itemId, timer] of this.flushTimers) {
+      clearTimeout(timer);
+      this.flushTimers.delete(itemId);
+      this.flushStock(itemId);
+    }
+  }
+
+  trackById(_index: number, item: SpareItem): string {
+    return item.id;
+  }
+
   createSpare(): void {
     if (this.spareForm.invalid) {
       this.spareForm.markAllAsTouched();
@@ -612,15 +630,23 @@ export class PartsWarehouseComponent implements OnInit {
     });
   }
 
-  changeStock(itemId: string, delta: number): void {
-    this.warehouseService.updateItemStock(itemId, delta).subscribe({
-      next: () => {
-        this.loadState();
-      },
-      error: (error) => {
-        this.notificationService.show('error', error.error?.message || 'No se pudo actualizar el stock.');
-      },
-    });
+  changeStock(item: SpareItem, delta: number): void {
+    if (item.stock + delta < 0) {
+      this.notificationService.show('error', 'No puedes dejar el stock del repuesto en negativo.');
+      return;
+    }
+
+    item.stock += delta;
+    this.pendingDeltas.set(item.id, (this.pendingDeltas.get(item.id) ?? 0) + delta);
+
+    const currentTimer = this.flushTimers.get(item.id);
+    if (currentTimer) {
+      clearTimeout(currentTimer);
+    }
+    this.flushTimers.set(item.id, setTimeout(() => {
+      this.flushTimers.delete(item.id);
+      this.flushStock(item.id);
+    }, STOCK_BATCH_DELAY_MS));
   }
 
   deleteItem(item: SpareItem): void {
@@ -676,10 +702,57 @@ export class PartsWarehouseComponent implements OnInit {
     });
   }
 
+  private flushStock(itemId: string): void {
+    if (this.inFlightItems.has(itemId)) {
+      return;
+    }
+
+    const delta = this.pendingDeltas.get(itemId) ?? 0;
+    this.pendingDeltas.delete(itemId);
+    if (!delta) {
+      return;
+    }
+
+    this.inFlightItems.add(itemId);
+    this.warehouseService.updateItemStock(itemId, delta).subscribe({
+      next: (updated) => {
+        this.inFlightItems.delete(itemId);
+        this.applyItemUpdate(updated);
+        if (this.pendingDeltas.has(itemId) && !this.flushTimers.has(itemId)) {
+          this.flushStock(itemId);
+        }
+      },
+      error: (error) => {
+        this.inFlightItems.delete(itemId);
+        this.pendingDeltas.delete(itemId);
+        const timer = this.flushTimers.get(itemId);
+        if (timer) {
+          clearTimeout(timer);
+          this.flushTimers.delete(itemId);
+        }
+        this.notificationService.show('error', error.error?.message || 'No se pudo actualizar el stock.');
+        this.loadState();
+      },
+    });
+  }
+
+  private applyItemUpdate(updated: SpareItem): void {
+    const item = this.items.find((current) => current.id === updated.id);
+    if (!item) {
+      return;
+    }
+
+    item.stock = updated.stock + (this.pendingDeltas.get(updated.id) ?? 0);
+    item.latestMovement = updated.latestMovement;
+  }
+
   private loadState(): void {
     this.warehouseService.getState().subscribe({
       next: (state) => {
-        this.items = state.items;
+        this.items = state.items.map((item) => ({
+          ...item,
+          stock: item.stock + (this.pendingDeltas.get(item.id) ?? 0),
+        }));
         this.oil = state.oil;
       },
       error: () => {

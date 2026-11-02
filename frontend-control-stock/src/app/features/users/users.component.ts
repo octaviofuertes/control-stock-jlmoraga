@@ -70,7 +70,7 @@ import { AppUser, UserService } from '../../core/services/user.service';
                 <td>{{ user.name }}</td>
                 <td>{{ user.email }}</td>
                 <td><span class="chip">{{ user.role }}</span></td>
-                <td>{{ user.createdAt | date:'shortDate' }}</td>
+                <td>{{ user.createdAt | date:'dd/MM/yyyy' }}</td>
                 <td class="actions-cell">
                   <button class="ghost-button danger" type="button" (click)="deleteUser(user)">Borrar</button>
                 </td>

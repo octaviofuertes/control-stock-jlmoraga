@@ -142,7 +142,7 @@ import { Tire, TireService } from '../../core/services/tire.service';
               <p *ngIf="hasStateChange(movement)">{{ formatStateTransition(movement.previousState, movement.previousRepairType, movement.newState, movement.newRepairType) }}</p>
               <p>{{ movement.notes || 'Sin observaciones' }}</p>
             </div>
-            <small>{{ movement.user.name }} | {{ movement.createdAt | date:'short' }}</small>
+            <small>{{ movement.user.name }} | {{ movement.createdAt | date:'dd/MM/yyyy HH:mm' }}</small>
           </div>
         </div>
         <div class="stock-more-actions" *ngIf="canShowMoreMovements">

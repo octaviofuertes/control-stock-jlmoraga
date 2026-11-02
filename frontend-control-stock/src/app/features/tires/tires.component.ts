@@ -263,7 +263,7 @@ interface TireGroupedSummary {
               <p>{{ item.previousPlate || 'Sin patente' }} -> {{ item.newPlate || 'Sin patente' }}</p>
               <p>{{ item.notes || 'Sin observaciones' }}</p>
             </div>
-            <small>{{ item.user.name }} | {{ item.createdAt | date:'short' }}</small>
+            <small>{{ item.user.name }} | {{ item.createdAt | date:'dd/MM/yyyy HH:mm' }}</small>
           </div>
         </div>
         <div class="stock-more-actions" *ngIf="canShowMoreHistory">

@@ -170,7 +170,7 @@ interface FleetUnit {
               <p>{{ formatMovementLocation(movement.previousLocation, movement.previousState, movement.previousRepairType, movement.previousDepositName, movement.previousPlate) }} -> {{ formatMovementLocation(movement.newLocation, movement.newState, movement.newRepairType, movement.newDepositName, movement.newPlate) }}</p>
               <p *ngIf="hasStateChange(movement)">{{ formatStateTransition(movement.previousState, movement.previousRepairType, movement.newState, movement.newRepairType) }}</p>
             </div>
-            <small>{{ movement.user.name }} | {{ movement.createdAt | date:'short' }}</small>
+            <small>{{ movement.user.name }} | {{ movement.createdAt | date:'dd/MM/yyyy HH:mm' }}</small>
           </div>
         </div>
         <div class="stock-more-actions" *ngIf="canShowMoreRecentMovements">
